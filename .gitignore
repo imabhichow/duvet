@@ -1,3 +1,9 @@
 .DS_Store
 /.idea
-/Cargo.lock
+build
+corpus/
+crashes/
+target
+**/*.rs.bk
+Cargo.lock
+*.tar.gz
