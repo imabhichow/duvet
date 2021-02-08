@@ -10,7 +10,7 @@ fn main() -> Result<()> {
     let tests = test::list::List::from_project(&project)?;
 
     tests.run(|test| {
-        let mut export: duvet::export::Export = test.run(&project)?;
+        let mut export: duvet::llvm_coverage::Export = test.run(&project)?;
         export.trim();
         dbg!(export);
         Ok(())

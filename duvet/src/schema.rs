@@ -1,6 +1,8 @@
+use byteorder::BigEndian as BE;
 use core::convert::TryInto;
 use hash_hasher::HashedMap;
 use sha2::{Digest, Sha256};
+use zerocopy::{byteorder::U32, AsBytes, FromBytes, Unaligned};
 
 #[derive(Default)]
 struct Hasher(Sha256);
@@ -17,21 +19,37 @@ impl core::hash::Hasher for Hasher {
 
 macro_rules! id {
     ($name:ident) => {
-        #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord, Hash)]
-        pub struct $name(pub(crate) i64);
+        #[derive(AsBytes, FromBytes, Unaligned, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        #[repr(C)]
+        pub struct $name(pub(crate) U32<BE>);
 
-        impl rusqlite::types::ToSql for $name {
-            fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput> {
-                self.0.to_sql()
+        impl $name {
+            pub fn new(value: u32) -> Self {
+                Self(U32::new(value))
             }
         }
 
-        impl rusqlite::types::FromSql for $name {
-            fn column_result(
-                value: rusqlite::types::ValueRef,
-            ) -> rusqlite::types::FromSqlResult<Self> {
-                let id = i64::column_result(value)?;
-                Ok(Self(id))
+        impl From<u32> for $name {
+            fn from(value: u32) -> Self {
+                Self::new(value)
+            }
+        }
+
+        impl From<U32<BE>> for $name {
+            fn from(value: U32<BE>) -> Self {
+                Self(value)
+            }
+        }
+
+        impl PartialOrd for $name {
+            fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+                Some(self.cmp(&other))
+            }
+        }
+
+        impl Ord for $name {
+            fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+                self.0.get().cmp(&other.0.get())
             }
         }
     };

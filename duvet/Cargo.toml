@@ -12,6 +12,7 @@ llvm-coverage = ["rustc-demangle", "serde", "serde_json", "serde_tuple"]
 
 [dependencies]
 anyhow = "1"
+byteorder = "1"
 hash_hasher = "2"
 rusqlite = { version = "0.24", features = ["bundled"] }
 rustc-demangle = { version = "0.1", optional = true }
@@ -19,7 +20,10 @@ serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 serde_tuple = { version = "0.5", optional = true }
 sha2 = "0.9"
+sled = "0.34"
 smallvec = "1"
+zerocopy = "0.3"
 
 [dev-dependencies]
 bolero = "0.6"
+insta = "1"
