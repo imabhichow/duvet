@@ -1,8 +1,96 @@
+use byteorder::BigEndian as BE;
 use core::{
     fmt,
     ops::{self, Range},
 };
 use std::io::{self, BufRead};
+use zerocopy::{AsBytes, FromBytes, Unaligned, U32};
+
+pub struct Loader<'a, R> {
+    pub contents: String,
+    reader: &'a mut R,
+}
+
+impl<'a, R: BufRead> Loader<'a, R> {
+    pub fn new(reader: &'a mut R) -> Self {
+        Self {
+            reader,
+            contents: String::new(),
+        }
+    }
+}
+
+impl<'a, R: BufRead> Iterator for Loader<'a, R> {
+    type Item = std::io::Result<LineInfo>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        macro_rules! unwrap {
+            ($expr:expr) => {
+                match $expr {
+                    Ok(v) => v,
+                    Err(err) => return Some(Err(err)),
+                }
+            };
+        }
+
+        let offset = self.contents.len();
+        let mut len = unwrap!(self.reader.read_line(&mut self.contents));
+
+        // EOF
+        if len == 0 {
+            return None;
+        }
+
+        let buf = unwrap!(self.reader.fill_buf());
+
+        // handle carriage returns
+        if buf.get(0).copied() == Some(b'\r') {
+            self.contents.push('\r');
+            self.reader.consume(1);
+            len += 1;
+        }
+
+        Some(Ok(LineInfo {
+            offset: U32::new(offset as _),
+            len: U32::new(len as _),
+        }))
+    }
+}
+
+#[derive(Clone, Copy, Debug, AsBytes, FromBytes, Unaligned)]
+#[repr(C)]
+pub struct LineInfo {
+    pub offset: U32<BE>,
+    pub len: U32<BE>,
+}
+
+impl LineInfo {
+    pub fn offset(self) -> usize {
+        self.offset.get() as _
+    }
+
+    pub fn len(self) -> usize {
+        self.len.get() as _
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+
+    fn range(&self) -> Range<usize> {
+        let offset = self.offset();
+        let len = self.len();
+        offset..(offset + len)
+    }
+
+    fn col_to_offset(&self, column: usize) -> Option<usize> {
+        if self.len() > column {
+            Some(self.offset() + column)
+        } else {
+            None
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct LinesIter<'a> {
@@ -57,36 +145,22 @@ impl<'a> Iterator for LinesIter<'a> {
 #[derive(Clone, Debug)]
 pub struct Source {
     contents: String,
-    lines: Vec<LineMap>,
+    lines: Vec<LineInfo>,
 }
 
 impl Source {
     pub fn read<R: BufRead>(reader: &mut R) -> io::Result<Self> {
-        let mut contents = String::new();
+        let mut loader = Loader::new(reader);
         let mut lines = vec![];
 
-        loop {
-            let offset = contents.len();
-            let mut len = reader.read_line(&mut contents)?;
-
-            // EOF
-            if len == 0 {
-                break;
-            }
-
-            let buf = reader.fill_buf()?;
-
-            // handle carriage returns
-            if buf.get(0).copied() == Some(b'\r') {
-                contents.push('\r');
-                reader.consume(1);
-                len += 1;
-            }
-
-            lines.push(LineMap { offset, len });
+        while let Some(line) = loader.next() {
+            lines.push(line?);
         }
 
-        Ok(Self { contents, lines })
+        Ok(Self {
+            contents: loader.contents,
+            lines,
+        })
     }
 
     pub fn line(&self, line: usize) -> Option<Line> {
@@ -101,7 +175,7 @@ impl Source {
         Some(Line {
             value,
             offset: Offset {
-                offset: map.offset,
+                offset: map.offset(),
                 line,
             },
         })
@@ -112,7 +186,7 @@ impl Source {
         Some(Offset { offset, line })
     }
 
-    fn get_line(&self, line: usize) -> Option<&LineMap> {
+    fn get_line(&self, line: usize) -> Option<&LineInfo> {
         // lines start at 1
         let line = line.checked_sub(1)?;
         self.lines.get(line)
@@ -167,26 +241,12 @@ struct LineMap {
     len: usize,
 }
 
-impl LineMap {
-    fn range(&self) -> Range<usize> {
-        self.offset..(self.offset + self.len as usize)
-    }
-
-    fn col_to_offset(&self, column: usize) -> Option<usize> {
-        if (self.len as usize) > column {
-            Some(self.offset + column)
-        } else {
-            None
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Cursor;
 
-    static CONTENTS: &str = include_str!("./linemap.rs");
+    static CONTENTS: &str = include_str!("./source.rs");
 
     fn read_self() -> Source {
         Source::read(&mut Cursor::new(CONTENTS)).unwrap()
@@ -212,6 +272,9 @@ mod tests {
     fn sanity_checks() {
         let source = read_self();
 
-        assert_eq!(source.line(1).as_deref(), Some("use core::{\n"));
+        assert_eq!(
+            source.line(1).as_deref(),
+            Some("use byteorder::BigEndian as BE;\n")
+        );
     }
 }
