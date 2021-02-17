@@ -1,5 +1,7 @@
-use crate::{entity::Entities, fs::Fs, region::Regions, reporters::Reporters};
+use crate::{entity::Entities, fs::Fs, region::Regions, reporters::Reporters, schema::IdSetExt};
 use anyhow::Result;
+use core::fmt;
+use rayon::prelude::*;
 use sled::{Config, Db as Inner};
 
 macro_rules! ids {
@@ -43,10 +45,10 @@ impl Db {
         let db = Config::new().temporary(true).open()?;
         let fs = Fs {
             contents: db.open_tree(FILE_CONTENTS)?,
-            line2offset: db.open_tree(FILE_LINE_TO_OFFSET)?,
-            offset2line: db.open_tree(FILE_OFFSET_TO_LINE)?,
-            path2id: db.open_tree(FILE_PATH_TO_ID)?,
-            id2path: db.open_tree(FILE_ID_TO_PATH)?,
+            line_to_offset: db.open_tree(FILE_LINE_TO_OFFSET)?,
+            offset_to_line: db.open_tree(FILE_OFFSET_TO_LINE)?,
+            path_to_id: db.open_tree(FILE_PATH_TO_ID)?,
+            id_to_path: db.open_tree(FILE_ID_TO_PATH)?,
         };
         let entities = Entities {
             attribute_entities: db.open_tree(ATTRIBUTE_ENTITIES)?,
@@ -69,6 +71,31 @@ impl Db {
         })
     }
 
+    pub fn finish(&self) -> Result<()> {
+        let files = self
+            .fs()
+            .id_to_path
+            .iter()
+            .keys()
+            .map(|f| {
+                let (f,) = f?.keys();
+                Ok(f)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        files
+            .par_iter()
+            .map(|file| {
+                self.regions().finish_file(*file, None)?;
+                Ok(())
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // TODO finish instances
+
+        Ok(())
+    }
+
     pub fn entities(&self) -> &Entities {
         &self.entities
     }
@@ -83,5 +110,16 @@ impl Db {
 
     pub fn reporters(&self) -> &Reporters {
         &self.reporters
+    }
+}
+
+impl fmt::Debug for Db {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Db")
+            .field("entities", &self.entities())
+            .field("fs", &self.fs())
+            .field("regions", &self.regions())
+            .field("reporters", &self.reporters())
+            .finish()
     }
 }

@@ -60,35 +60,33 @@ impl<'a, R: BufRead> Iterator for Loader<'a, R> {
 #[derive(Clone, Copy, Debug, AsBytes, FromBytes, Unaligned)]
 #[repr(C)]
 pub struct LineInfo {
-    pub offset: U32<BE>,
-    pub len: U32<BE>,
+    pub(crate) offset: U32<BE>,
+    pub(crate) len: U32<BE>,
 }
 
 impl LineInfo {
-    pub fn offset(self) -> usize {
-        self.offset.get() as _
+    pub fn offset(self) -> u32 {
+        self.offset.get()
     }
 
-    pub fn len(self) -> usize {
-        self.len.get() as _
+    pub fn len(self) -> u32 {
+        self.len.get()
     }
 
     pub fn is_empty(self) -> bool {
         self.len() == 0
     }
 
-    fn range(&self) -> Range<usize> {
+    fn range(&self) -> Range<u32> {
         let offset = self.offset();
         let len = self.len();
         offset..(offset + len)
     }
 
-    fn col_to_offset(&self, column: usize) -> Option<usize> {
-        if self.len() > column {
-            Some(self.offset() + column)
-        } else {
-            None
-        }
+    pub fn range_usize(&self) -> Range<usize> {
+        let offset = self.offset() as usize;
+        let len = self.len() as usize;
+        offset..(offset + len)
     }
 }
 
@@ -131,8 +129,8 @@ impl<'a> Iterator for LinesIter<'a> {
         let value = Line {
             value,
             offset: Offset {
-                offset: self.offset,
-                line: self.line,
+                offset: self.offset as _,
+                line: self.line as _,
             },
         };
 
@@ -163,13 +161,13 @@ impl Source {
         })
     }
 
-    pub fn line(&self, line: usize) -> Option<Line> {
+    pub fn line(&self, line: u32) -> Option<Line> {
         let map = self.get_line(line)?;
 
         let value = if cfg!(debug_assertions) {
-            &self.contents[map.range()]
+            &self.contents[map.range_usize()]
         } else {
-            unsafe { self.contents.get_unchecked(map.range()) }
+            unsafe { self.contents.get_unchecked(map.range_usize()) }
         };
 
         Some(Line {
@@ -181,23 +179,18 @@ impl Source {
         })
     }
 
-    pub fn lincol_to_offset(&self, line: usize, column: usize) -> Option<Offset> {
-        let offset = self.get_line(line)?.col_to_offset(column)?;
-        Some(Offset { offset, line })
-    }
-
-    fn get_line(&self, line: usize) -> Option<&LineInfo> {
+    fn get_line(&self, line: u32) -> Option<&LineInfo> {
         // lines start at 1
         let line = line.checked_sub(1)?;
-        self.lines.get(line)
+        self.lines.get(line as usize)
     }
 }
 
 /// Checked offset
 pub struct Offset {
-    offset: usize,
+    offset: u32,
     /// Used to look the offset line number back up
-    line: usize,
+    line: u32,
 }
 
 pub struct Line<'a> {
@@ -206,11 +199,11 @@ pub struct Line<'a> {
 }
 
 impl<'a> Line<'a> {
-    pub fn offset(&self) -> usize {
+    pub fn offset(&self) -> u32 {
         self.offset.offset
     }
 
-    pub fn line(&self) -> usize {
+    pub fn line(&self) -> u32 {
         self.offset.line
     }
 }
@@ -257,14 +250,10 @@ mod tests {
         let source = read_self();
 
         bolero::check!()
-            .with_generator((0..(source.lines.len() * 2), 0..2000))
+            .with_generator((0..(source.lines.len() as u32 * 2), 0..2000))
             .cloned()
             .for_each(|(line, column)| {
-                let l = source.line(line);
-                let offset = source.lincol_to_offset(line, column);
-                if offset.is_some() {
-                    assert!(l.is_some());
-                }
+                let _ = source.line(line);
             });
     }
 

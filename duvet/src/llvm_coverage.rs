@@ -1,5 +1,12 @@
+use crate::{
+    db::Db,
+    schema::{FileId, InstanceId},
+};
+use anyhow::{Context, Result};
+use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json::Value;
+use std::path::Path;
 
 #[derive(Debug, Deserialize)]
 pub struct Export {
@@ -16,6 +23,13 @@ impl Export {
             data.trim();
         }
         self.data.retain(|data: &Data| !data.is_empty())
+    }
+
+    pub fn load(&self, db: &Db) -> Result<()> {
+        for data in &self.data {
+            data.load(db)?;
+        }
+        Ok(())
     }
 }
 
@@ -39,6 +53,15 @@ impl Data {
 
         is_empty
     }
+
+    pub fn load(&self, db: &Db) -> Result<()> {
+        self.files
+            .par_iter()
+            .map(|f| f.load(db))
+            .chain(self.functions.par_iter().map(|f| f.load(db)))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,6 +75,20 @@ pub struct File {
 impl File {
     pub fn is_external(&self) -> bool {
         self.filename.starts_with('/')
+    }
+
+    pub fn load(&self, db: &Db) -> Result<()> {
+        let file = db
+            .fs()
+            .load_file(Path::new(&self.filename))
+            .with_context(|| format!("could not load source file: {:?}", self.filename))?;
+
+        // TODO support instances
+        let instance = None;
+        for segment in &self.segments {
+            segment.load(db, file, instance)?;
+        }
+        Ok(())
     }
 }
 
@@ -74,6 +111,25 @@ impl Function {
             .iter()
             .all(|filename| filename.starts_with('/'))
     }
+
+    pub fn load(&self, db: &Db) -> Result<()> {
+        let files = self
+            .filenames
+            .iter()
+            .map(|file| {
+                db.fs()
+                    .load_file(Path::new(file))
+                    .with_context(|| format!("could not load source file: {:?}", file))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        for file in files {
+            let instance = None;
+            for region in &self.regions {
+                region.load(db, file, instance)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 fn demangle<'de, D>(de: D) -> Result<String, D::Error>
@@ -95,6 +151,12 @@ pub struct Segment {
     pub is_gap_region: bool,
 }
 
+impl Segment {
+    pub fn load(&self, db: &Db, file: FileId, instance: Option<InstanceId>) -> Result<()> {
+        Ok(())
+    }
+}
+
 #[derive(Debug, serde_tuple::Deserialize_tuple)]
 pub struct Region {
     pub line_start: usize,
@@ -105,6 +167,27 @@ pub struct Region {
     pub file_id: usize,
     pub expanded_file_id: usize,
     pub kind: u64,
+}
+
+impl Region {
+    pub fn load(&self, db: &Db, file: FileId, instance: Option<InstanceId>) -> Result<()> {
+        let offsets = db
+            .fs()
+            .map_line_column(
+                file,
+                (
+                    (self.line_start - 1) as _,
+                    (self.col_start.saturating_sub(1)) as _,
+                ),
+                ((self.line_end - 1) as _, (self.col_end - 1) as _),
+            )
+            .unwrap();
+
+        let entity = db.entities().create()?;
+        db.regions().insert(file, instance, entity, offsets)?;
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize)]

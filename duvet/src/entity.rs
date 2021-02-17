@@ -2,7 +2,10 @@ use crate::{
     attribute::{self, Attribute},
     schema::EntityId,
 };
+use core::fmt;
 use sled::{transaction::TransactionError, Result, Tree};
+
+pub type Id = EntityId;
 
 pub struct Entities {
     /// Stores all of the created entities
@@ -14,7 +17,7 @@ pub struct Entities {
 }
 
 impl Entities {
-    pub fn insert(&self) -> Result<EntityId> {
+    pub fn create(&self) -> Result<EntityId> {
         let res = self.entities.transaction(|entities| {
             let id = entities.generate_id()? as _;
             let id = EntityId::new(id);
@@ -50,5 +53,13 @@ impl Entities {
         let value = self.attributes.get(attr.prefix_with(id))?;
         let value = value.map(T::load);
         Ok(value)
+    }
+}
+
+impl fmt::Debug for Entities {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Entities")
+            .field("len", &self.entities.len())
+            .finish()
     }
 }

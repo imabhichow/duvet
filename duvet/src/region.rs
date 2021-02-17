@@ -1,6 +1,6 @@
 use crate::schema::{EntityId, FileId, IdSet, IdSetExt, InstanceId};
 use byteorder::BigEndian as BE;
-use core::ops::Range;
+use core::{fmt, ops::Range};
 use sled::{Result, Tree};
 use std::collections::HashMap;
 use zerocopy::{AsBytes, FromBytes, LayoutVerified, Unaligned, U32};
@@ -26,7 +26,7 @@ impl Regions {
         self.markers.set_merge_operator(Self::merge_entry);
     }
 
-    pub fn insert_region(
+    pub fn insert(
         &self,
         file: FileId,
         instance: Option<InstanceId>,
@@ -142,6 +142,14 @@ impl Regions {
             .unwrap_or_else(|| Vec::with_capacity(merged_bytes.len()));
         value.extend_from_slice(merged_bytes);
         Some(value)
+    }
+}
+
+impl fmt::Debug for Regions {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Regions")
+            .field("len", &self.regions.len())
+            .finish()
     }
 }
 

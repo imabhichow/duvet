@@ -65,7 +65,10 @@ impl Builder {
 
     fn llvm_dir(&self) -> Result<PathBuf> {
         let mut cmd = Command::new("rustup");
-        cmd.arg(&self.toolchain()).arg("which").arg("rustc");
+        cmd.arg("which")
+            .arg("--toolchain")
+            .arg(&self.toolchain)
+            .arg("rustc");
         let result = cmd.output()?.status_as_result()?;
         let rustc = core::str::from_utf8(&result.stdout)
             .expect("invalid rustc path")
@@ -114,7 +117,7 @@ impl Project {
         cmd.arg(&self.cargo_toolchain)
             .arg(c)
             .arg("--target-dir")
-            .arg("target/coverage")
+            .arg("target/cargo-duvet")
             .env("RUSTFLAGS", "-Zinstrument-coverage");
 
         if let Some(path) = self.manifest_path.as_ref() {
@@ -131,5 +134,20 @@ impl Project {
     pub fn llvm_bin(&self, name: &str) -> Command {
         let bin = self.llvm_dir.join(Path::new(name));
         Command::new(bin)
+    }
+
+    pub fn install_llvm_tools(&self) -> Result<()> {
+        let bin = self.llvm_dir.join("llvm-profdata");
+        if !bin.exists() {
+            let mut cmd = Command::new("rustup");
+
+            cmd.arg(&self.cargo_toolchain)
+                .arg("component")
+                .arg("add")
+                .arg("llvm-tools-preview");
+
+            crate::process::exec(cmd)?;
+        }
+        Ok(())
     }
 }

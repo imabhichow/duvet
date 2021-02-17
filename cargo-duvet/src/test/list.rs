@@ -2,8 +2,13 @@ use crate::{
     process::{exec, Command, StatusAsResult},
     project::Project,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use rayon::prelude::*;
+use std::path::{Path, PathBuf};
+
+fn dir() -> PathBuf {
+    Path::new("target").join("cargo-duvet")
+}
 
 #[derive(Debug)]
 pub struct List {
@@ -17,65 +22,58 @@ impl List {
         build
             .arg("--all")
             .arg("--no-run")
-            .env("LLVM_PROFILE_FILE", "target/coverage/_build.profdata");
+            .env("LLVM_PROFILE_FILE", dir().join("_build.profdata"));
         exec(build)?;
 
-        let targets: Vec<_> = project
-            .manifest
-            .packages
-            .iter()
-            .flat_map(|package| {
-                let name = &package.name;
-                package.targets.iter().map(move |target| (name, target))
-            })
-            .collect();
+        let mut list = project.cargo("test");
 
-        let mut tests = targets
+        list.arg("--all")
+            .arg("--")
+            .arg("--list")
+            .arg("--format")
+            .arg("terse")
+            .env("LLVM_PROFILE_FILE", dir().join("_list.profdata"));
+
+        let result = list
+            .output()
+            .expect("list should always work")
+            .status_as_result()
+            .expect("list should always work");
+
+        let binaries: Vec<_> = find_binary_paths(&result.stderr).collect();
+
+        let mut tests = binaries
             .par_iter()
-            .flat_map(|(package_name, target)| {
-                let mut tests = vec![];
+            .flat_map(|binary| {
+                let mut list = Command::new(binary);
+                list.arg("--list")
+                    .arg("--format")
+                    .arg("terse")
+                    .env("LLVM_PROFILE_FILE", dir().join("_list.profdata"));
 
-                for kind in &target.kind {
-                    let mut list = project.cargo("test");
-                    list.arg("--package").arg(package_name);
+                let result = list
+                    .output()
+                    .expect("list should always work")
+                    .status_as_result()
+                    .expect("list should always work");
 
-                    if kind_args(kind, &target.name, &mut list).is_none() {
-                        continue;
-                    }
+                let stdout = core::str::from_utf8(&result.stdout).expect("invalid list output");
 
-                    list.arg("--")
-                        .arg("--list")
-                        .env("LLVM_PROFILE_FILE", "target/coverage/_list.profdata");
-
-                    let result = list
-                        .output()
-                        .expect("list should always work")
-                        .status_as_result()
-                        .expect("list should always work");
-
-                    let binary = find_binary_path(&result.stderr).expect("missing binary path");
-
-                    let stdout = core::str::from_utf8(&result.stdout).expect("invalid list output");
-
-                    tests.extend(
-                        stdout
-                            .split('\n')
-                            .filter(|line| !line.is_empty())
-                            .filter_map(|line| {
-                                let mut line = line.split(": ");
-                                let name = line.next()?;
-                                let ty = line.next()?;
-                                Some([name, ty])
-                            })
-                            .map(|[name, _ty]| Test {
-                                id: 0, // this will be initialized later
-                                binary: binary.to_string(),
-                                name: name.to_string(),
-                            }),
-                    );
-                }
-
-                tests
+                stdout
+                    .split('\n')
+                    .filter(|line| !line.is_empty())
+                    .filter_map(|line| {
+                        let mut line = line.split(": ");
+                        let name = line.next()?;
+                        let ty = line.next()?;
+                        Some([name, ty])
+                    })
+                    .map(|[name, _ty]| Test {
+                        id: 0, // this will be initialized later
+                        binary: binary.to_string(),
+                        name: name.to_string(),
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
 
@@ -84,6 +82,10 @@ impl List {
         }
 
         Ok(Self { tests })
+    }
+
+    pub fn as_slice(&self) -> &[Test] {
+        &self.tests
     }
 
     pub fn run<F>(&self, run: F) -> Result<()>
@@ -116,10 +118,22 @@ pub struct Test {
 }
 
 impl Test {
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn binary(&self) -> &str {
+        &self.binary
+    }
+
     pub fn run<T: serde::de::DeserializeOwned>(&self, project: &Project) -> Result<T> {
         let mut test = Command::new(&self.binary);
-        let profraw = format!("target/coverage/{}.profraw", self.id);
-        let profdata = format!("target/coverage/{}.profdata", self.id);
+        let profraw = dir().join(format!("{}.profraw", self.id));
+        let profdata = dir().join(format!("{}.profdata", self.id));
 
         test.arg("--exact")
             .arg(&self.name)
@@ -141,7 +155,7 @@ impl Test {
             .arg("-o")
             .arg(&profdata);
 
-        exec(merge)?;
+        exec(merge).context("while calling llvm-profdata")?;
 
         // llvm-cov is not included with rustup
         let mut export = Command::new("llvm-cov");
@@ -150,7 +164,8 @@ impl Test {
             .arg(&self.binary)
             .arg("-instr-profile")
             .arg(&profdata)
-            .arg("-format=text");
+            .arg("-format=text")
+            .arg("-num-threads=1");
 
         let result = export.output()?.status_as_result()?;
         let coverage = serde_json::from_slice(&result.stdout)?;
@@ -172,14 +187,17 @@ fn kind_args(kind: &str, name: &str, cmd: &mut Command) -> Option<()> {
     Some(())
 }
 
-fn find_binary_path(stderr: &[u8]) -> Option<&str> {
+fn find_binary_paths(stderr: &[u8]) -> impl Iterator<Item = &str> {
     core::str::from_utf8(&stderr)
-        .ok()?
-        .split('\n')
-        .find_map(|line| {
-            let line = line.trim();
-            let mut line = line.split("Running ");
-            line.next()?;
-            line.next()
+        .ok()
+        .map(|s| {
+            s.split('\n').filter_map(|line| {
+                let line = line.trim();
+                let mut line = line.split("Running ");
+                line.next()?;
+                line.next()
+            })
         })
+        .into_iter()
+        .flatten()
 }

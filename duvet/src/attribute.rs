@@ -4,7 +4,7 @@ use core::{fmt, marker::PhantomData};
 use sled::IVec;
 use zerocopy::AsBytes;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
 pub struct Attribute<T> {
     key: [u8; 20],
     path: &'static str,
@@ -18,6 +18,13 @@ impl<T> Attribute<T> {
             key: sha1(&ConstBuffer::from_slice(path.as_bytes())).bytes(),
             path,
             value: PhantomData,
+        }
+    }
+
+    pub const fn dependency(&self) -> Dependency {
+        Dependency {
+            key: self.key,
+            path: self.path,
         }
     }
 
@@ -67,6 +74,19 @@ macro_rules! attribute {
 pub trait Value {
     fn load(value: IVec) -> Self;
     fn store(self) -> IVec;
+}
+
+impl Value for () {
+    fn load(_value: IVec) -> Self {}
+
+    fn store(self) -> IVec {
+        IVec::from(vec![])
+    }
+}
+
+pub struct Dependency {
+    key: [u8; 20],
+    path: &'static str,
 }
 
 #[cfg(test)]
