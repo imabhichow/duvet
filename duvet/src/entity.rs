@@ -1,6 +1,6 @@
 use crate::{
     attribute::{self, Attribute},
-    schema::EntityId,
+    schema::{EntityId, IdSetExt},
 };
 use core::fmt;
 use sled::{transaction::TransactionError, Result, Tree};
@@ -17,6 +17,8 @@ pub struct Entities {
 }
 
 impl Entities {
+    pub(crate) fn init(&self) {}
+
     pub fn create(&self) -> Result<EntityId> {
         let res = self.entities.transaction(|entities| {
             let id = entities.generate_id()? as _;
@@ -35,12 +37,12 @@ impl Entities {
     pub fn set_attribute<T: attribute::Value>(
         &self,
         id: EntityId,
-        attr: &Attribute<T>,
+        attr: Attribute<T>,
         value: T,
     ) -> Result<()> {
         self.attributes
             .insert(attr.prefix_with(id), value.store())?;
-        self.attributes.insert(attr.suffix_with(id), &[])?;
+        self.attribute_entities.insert(attr.suffix_with(id), &[])?;
 
         Ok(())
     }
@@ -53,6 +55,21 @@ impl Entities {
         let value = self.attributes.get(attr.prefix_with(id))?;
         let value = value.map(T::load);
         Ok(value)
+    }
+
+    pub fn has_attribute<T>(&self, id: EntityId, attr: Attribute<T>) -> Result<bool> {
+        self.attributes.contains_key(attr.prefix_with(id))
+    }
+
+    pub fn references<T>(&self, attr: Attribute<T>) -> impl Iterator<Item = Result<EntityId>> {
+        self.attribute_entities
+            .scan_prefix(attr.key())
+            .map(|entity| {
+                let (k, _) = entity?;
+                let k = &k[20..];
+                let (k,) = k.keys();
+                Ok(k)
+            })
     }
 }
 

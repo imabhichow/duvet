@@ -1,15 +1,27 @@
 use crate::schema::Id;
 use const_sha1::{sha1, ConstBuffer};
-use core::{fmt, marker::PhantomData};
+use core::{convert::TryInto, fmt, marker::PhantomData};
 use sled::IVec;
 use zerocopy::AsBytes;
 
-#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(PartialEq, PartialOrd, Eq, Ord)]
 pub struct Attribute<T> {
     key: [u8; 20],
     path: &'static str,
     value: PhantomData<T>,
 }
+
+impl<T> Clone for Attribute<T> {
+    fn clone(&self) -> Self {
+        Self {
+            key: self.key,
+            path: self.path,
+            value: PhantomData,
+        }
+    }
+}
+
+impl<T> Copy for Attribute<T> {}
 
 impl<T> Attribute<T> {
     #[doc(hidden)]
@@ -40,6 +52,10 @@ impl<T> Attribute<T> {
         out[..20].copy_from_slice(&self.key);
         out[20..].copy_from_slice(id.into_inner().as_bytes());
         out
+    }
+
+    pub(crate) fn key(&self) -> &[u8; 20] {
+        &self.key
     }
 }
 
@@ -83,6 +99,26 @@ impl Value for () {
         IVec::from(vec![])
     }
 }
+
+macro_rules! impl_int {
+    ($ty:ident) => {
+        impl Value for $ty {
+            fn load(value: IVec) -> Self {
+                let value = value.as_bytes().try_into().expect("invalid value");
+                $ty::from_be_bytes(value)
+            }
+
+            fn store(self) -> IVec {
+                self.to_be_bytes().to_vec().into()
+            }
+        }
+    };
+}
+
+impl_int!(u8);
+impl_int!(u16);
+impl_int!(u32);
+impl_int!(u64);
 
 pub struct Dependency {
     key: [u8; 20],

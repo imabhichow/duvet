@@ -1,17 +1,21 @@
 #[macro_use]
 pub mod attribute;
 
+mod marker;
+
+pub mod coverage;
 pub mod db;
 pub mod entity;
 pub mod fs;
+pub mod html;
+pub mod notification;
 pub mod region;
-pub mod reporters;
 pub mod schema;
 pub mod source;
 pub mod types;
 
-#[cfg(feature = "llvm-coverage")]
-pub mod llvm_coverage;
+#[cfg(feature = "highlight")]
+pub mod highlight;
 
 #[cfg(feature = "rust-src")]
 pub mod rust_src;

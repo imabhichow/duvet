@@ -1,8 +1,11 @@
-use crate::{entity::Entities, fs::Fs, region::Regions, reporters::Reporters, schema::IdSetExt};
+use crate::{
+    entity::Entities, fs::Fs, marker::Markers, notification::Notifications, region::Regions,
+    schema::IdSetExt,
+};
 use anyhow::Result;
 use core::fmt;
 use rayon::prelude::*;
-use sled::{Config, Db as Inner};
+use tempdir::TempDir;
 
 macro_rules! ids {
     ($($name:ident),* $(,)?) => {
@@ -27,22 +30,24 @@ ids!(
     ATTRIBUTES,
     ENTITIES,
     ENTITY_REGIONS,
-    MARKERS,
-    REGIONS,
+    REGION_MARKERS,
+    NOTIFICATION_MARKERS,
+    NOTIFICATION_REGIONS,
 );
 
 pub struct Db {
     #[allow(dead_code)]
-    db: Inner,
+    db: Sled,
     entities: Entities,
     fs: Fs,
     regions: Regions,
-    reporters: Reporters,
+    notifications: Notifications,
 }
 
 impl Db {
     pub fn new() -> Result<Self> {
-        let db = Config::new().temporary(true).open()?;
+        let db = Sled::new()?;
+
         let fs = Fs {
             contents: db.open_tree(FILE_CONTENTS)?,
             line_to_offset: db.open_tree(FILE_LINE_TO_OFFSET)?,
@@ -57,21 +62,24 @@ impl Db {
         };
         let regions = Regions {
             entity_regions: db.open_tree(ENTITY_REGIONS)?,
-            markers: db.open_tree(MARKERS)?,
-            regions: db.open_tree(REGIONS)?,
+            markers: Markers::new(db.open_tree(REGION_MARKERS)?),
         };
-        regions.init();
-        let reporters = Reporters::new();
+        let notifications = Notifications::new(
+            Markers::new(db.open_tree(NOTIFICATION_MARKERS)?),
+            db.open_tree(NOTIFICATION_REGIONS)?,
+        );
+        entities.init();
+
         Ok(Self {
             db,
             entities,
             fs,
             regions,
-            reporters,
+            notifications,
         })
     }
 
-    pub fn finish(&self) -> Result<()> {
+    pub fn finish_regions(&self) -> Result<()> {
         let files = self
             .fs()
             .id_to_path
@@ -83,15 +91,40 @@ impl Db {
             })
             .collect::<Result<Vec<_>>>()?;
 
+        let regions = self.regions();
+
         files
             .par_iter()
             .map(|file| {
-                self.regions().finish_file(*file, None)?;
+                regions.finish_file(*file)?;
                 Ok(())
             })
             .collect::<Result<Vec<_>>>()?;
 
-        // TODO finish instances
+        Ok(())
+    }
+
+    pub fn finish_notifications(&self) -> Result<()> {
+        let files = self
+            .fs()
+            .id_to_path
+            .iter()
+            .keys()
+            .map(|f| {
+                let (f,) = f?.keys();
+                Ok(f)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let notifications = self.notifications();
+
+        files
+            .par_iter()
+            .map(|file| {
+                notifications.finish_file(*file)?;
+                Ok(())
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(())
     }
@@ -108,8 +141,8 @@ impl Db {
         &self.regions
     }
 
-    pub fn reporters(&self) -> &Reporters {
-        &self.reporters
+    pub fn notifications(&self) -> &Notifications {
+        &self.notifications
     }
 }
 
@@ -119,7 +152,34 @@ impl fmt::Debug for Db {
             .field("entities", &self.entities())
             .field("fs", &self.fs())
             .field("regions", &self.regions())
-            .field("reporters", &self.reporters())
             .finish()
+    }
+}
+
+pub(crate) struct Sled {
+    #[allow(dead_code)]
+    dir: TempDir,
+    db: sled::Db,
+}
+
+impl Sled {
+    pub fn new() -> Result<Self> {
+        let dir = TempDir::new("duvet")?;
+
+        let db = sled::Config::new()
+            .path(dir.path())
+            .mode(sled::Mode::HighThroughput)
+            .temporary(true)
+            .open()?;
+
+        Ok(Self { dir, db })
+    }
+}
+
+impl core::ops::Deref for Sled {
+    type Target = sled::Db;
+
+    fn deref(&self) -> &Self::Target {
+        &self.db
     }
 }

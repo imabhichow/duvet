@@ -1,4 +1,6 @@
+use crate::attribute::Value;
 use byteorder::BigEndian as BE;
+use sled::IVec;
 use zerocopy::{byteorder::U32, AsBytes, FromBytes, Unaligned};
 
 macro_rules! id {
@@ -20,6 +22,16 @@ macro_rules! id {
 
             fn from_inner(value: U32<BE>) -> Self {
                 Self(value)
+            }
+        }
+
+        impl Value for $name {
+            fn load(value: IVec) -> Self {
+                Self::new(Value::load(value))
+            }
+
+            fn store(self) -> IVec {
+                self.into()
             }
         }
 
@@ -184,30 +196,3 @@ join_tuple!(A, B, C, D);
 join_tuple!(A, B, C, D, E);
 join_tuple!(A, B, C, D, E, F);
 join_tuple!(A, B, C, D, E, F, G);
-
-/// A notification that is displayed when dependencies are not met
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Eq, Ord, Hash)]
-pub struct Notification {
-    /// The title of the notification
-    pub title: Option<String>,
-    /// The description of the notification
-    pub message: Option<String>,
-    /// The severity level of the notification
-    pub level: Level,
-}
-
-/// A severity level for a notification
-#[derive(Clone, Debug, PartialEq, PartialOrd, Eq, Ord, Hash)]
-pub enum Level {
-    Fatal,
-    Error,
-    Warning,
-    Info,
-    Debug,
-}
-
-impl Default for Level {
-    fn default() -> Self {
-        Self::Info
-    }
-}

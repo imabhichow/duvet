@@ -1,12 +1,25 @@
 use crate::{
     db::Db,
-    schema::{FileId, InstanceId},
+    schema::{EntityId, FileId},
+    types::EXECUTIONS,
 };
 use anyhow::{Context, Result};
 use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::Path;
+
+pub trait EntityVisitor: Sync {
+    fn on_entity(&self, file: FileId, entity: EntityId) -> Result<()>;
+}
+
+pub struct FnVisitor<F: Sync + Fn(FileId, EntityId) -> Result<()>>(pub F);
+
+impl<F: Sync + Fn(FileId, EntityId) -> Result<()>> EntityVisitor for FnVisitor<F> {
+    fn on_entity(&self, file: FileId, entity: EntityId) -> Result<()> {
+        (self.0)(file, entity)
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct Export {
@@ -25,9 +38,9 @@ impl Export {
         self.data.retain(|data: &Data| !data.is_empty())
     }
 
-    pub fn load(&self, db: &Db) -> Result<()> {
+    pub fn load<V: EntityVisitor>(&self, db: &Db, visitor: &V) -> Result<()> {
         for data in &self.data {
-            data.load(db)?;
+            data.load(db, visitor)?;
         }
         Ok(())
     }
@@ -54,12 +67,17 @@ impl Data {
         is_empty
     }
 
-    pub fn load(&self, db: &Db) -> Result<()> {
+    pub fn load<V: EntityVisitor>(&self, db: &Db, visitor: &V) -> Result<()> {
+        if self.is_empty() {
+            return Ok(());
+        }
+
         self.files
             .par_iter()
             .map(|f| f.load(db))
-            .chain(self.functions.par_iter().map(|f| f.load(db)))
+            .chain(self.functions.par_iter().map(|f| f.load(db, visitor)))
             .collect::<Result<Vec<_>>>()?;
+
         Ok(())
     }
 }
@@ -78,15 +96,17 @@ impl File {
     }
 
     pub fn load(&self, db: &Db) -> Result<()> {
+        if self.is_external() {
+            return Ok(());
+        }
+
         let file = db
             .fs()
             .load_file(Path::new(&self.filename))
             .with_context(|| format!("could not load source file: {:?}", self.filename))?;
 
-        // TODO support instances
-        let instance = None;
         for segment in &self.segments {
-            segment.load(db, file, instance)?;
+            segment.load(db, file)?;
         }
         Ok(())
     }
@@ -112,7 +132,11 @@ impl Function {
             .all(|filename| filename.starts_with('/'))
     }
 
-    pub fn load(&self, db: &Db) -> Result<()> {
+    pub fn load<V: EntityVisitor>(&self, db: &Db, visitor: &V) -> Result<()> {
+        if self.is_empty() {
+            return Ok(());
+        }
+
         let files = self
             .filenames
             .iter()
@@ -122,12 +146,13 @@ impl Function {
                     .with_context(|| format!("could not load source file: {:?}", file))
             })
             .collect::<Result<Vec<_>>>()?;
+
         for file in files {
-            let instance = None;
             for region in &self.regions {
-                region.load(db, file, instance)?;
+                region.load(db, file, visitor)?;
             }
         }
+
         Ok(())
     }
 }
@@ -152,7 +177,8 @@ pub struct Segment {
 }
 
 impl Segment {
-    pub fn load(&self, db: &Db, file: FileId, instance: Option<InstanceId>) -> Result<()> {
+    pub fn load(&self, db: &Db, file: FileId) -> Result<()> {
+        // TODO
         Ok(())
     }
 }
@@ -170,7 +196,11 @@ pub struct Region {
 }
 
 impl Region {
-    pub fn load(&self, db: &Db, file: FileId, instance: Option<InstanceId>) -> Result<()> {
+    pub fn load<V: EntityVisitor>(&self, db: &Db, file: FileId, visitor: &V) -> Result<()> {
+        if self.execution_count == 0 {
+            return Ok(());
+        }
+
         let offsets = db
             .fs()
             .map_line_column(
@@ -184,7 +214,10 @@ impl Region {
             .unwrap();
 
         let entity = db.entities().create()?;
-        db.regions().insert(file, instance, entity, offsets)?;
+        db.entities()
+            .set_attribute(entity, EXECUTIONS, self.execution_count)?;
+        visitor.on_entity(file, entity)?;
+        db.regions().insert(file, offsets, entity)?;
 
         Ok(())
     }

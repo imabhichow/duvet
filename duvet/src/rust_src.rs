@@ -17,13 +17,14 @@ pub struct Config {
 }
 
 impl RustSrc {
-    pub fn report(&self, db: &Db) -> Result<()> {
+    pub fn annotate(&self, db: &Db) -> Result<()> {
         for file in db.fs().iter() {
             let (file, _path) = file?;
             let content = db.fs().open(file)?;
             match syn::parse_file(&content) {
                 Ok(ast) => {
                     let entity = db.entities().create()?;
+                    db.entities().set_attribute(entity, types::CODE, ())?;
                     let mut visitor = Visitor {
                         config: &self.config,
                         db,
@@ -73,7 +74,7 @@ impl<'a> Visitor<'a> {
 
         self.db
             .regions()
-            .insert(self.file, None, self.entity, offsets)
+            .insert(self.file, offsets, self.entity)
             .unwrap();
     }
 
@@ -98,7 +99,7 @@ impl<'a> Visitor<'a> {
 
         self.db
             .regions()
-            .insert(self.file, None, self.entity, open_offset)
+            .insert(self.file, open_offset, self.entity)
             .unwrap();
 
         let close_offset = self
@@ -113,7 +114,7 @@ impl<'a> Visitor<'a> {
 
         self.db
             .regions()
-            .insert(self.file, None, self.entity, close_offset)
+            .insert(self.file, close_offset, self.entity)
             .unwrap();
     }
 
@@ -456,7 +457,7 @@ impl<'a, 'ast> Visit<'ast> for Visitor<'a> {
 
         self.db
             .entities()
-            .set_attribute(self.entity, &types::FUNCTION, ())
+            .set_attribute(self.entity, types::FUNCTION, ())
             .unwrap();
 
         let parent_mode = self.on_attrs(&i.attrs);
@@ -485,7 +486,7 @@ impl<'a, 'ast> Visit<'ast> for Visitor<'a> {
 
         self.db
             .entities()
-            .set_attribute(self.entity, &types::FUNCTION, ())
+            .set_attribute(self.entity, types::FUNCTION, ())
             .unwrap();
 
         visit::visit_item_fn(self, i);
@@ -586,7 +587,7 @@ impl<'a, 'ast> Visit<'ast> for Visitor<'a> {
 
         self.db
             .entities()
-            .set_attribute(self.entity, &types::FUNCTION, ())
+            .set_attribute(self.entity, types::FUNCTION, ())
             .unwrap();
 
         visit::visit_trait_item_method(self, i);

@@ -107,6 +107,23 @@ impl Fs {
         }
     }
 
+    pub fn path(&self, file: FileId) -> Result<IStr> {
+        let contents = self.id_to_path.get(file)?;
+        if let Some(contents) = contents {
+            Ok(IStr(contents))
+        } else {
+            Err(anyhow!("could not find file {:?}", file))
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.id_to_path.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.id_to_path.is_empty()
+    }
+
     pub fn line_offsets(&self, file: FileId, line: u32) -> Result<LineOffsets> {
         let offset = self.line_to_offset.get(&(file, line).join())?;
         if let Some(offset) = offset {

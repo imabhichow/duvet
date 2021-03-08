@@ -1,140 +1,157 @@
 use anyhow::Result;
-use duvet::db::Db;
-use std::{collections::HashMap, sync::Mutex};
-use tokio::task::spawn_blocking;
+use duvet::{
+    coverage::{self, llvm},
+    db::Db,
+    notification, types,
+};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use std::{sync::Arc, thread};
 
 mod manifest;
 mod process;
 mod project;
 mod test;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let db = Db::new()?;
     let project = project::Builder::default().build()?;
     project.install_llvm_tools()?;
     let tests = test::list::List::from_project(&project)?;
 
-    let progress = prodash::TreeOptions::default().create();
+    let style = ProgressStyle::default_bar()
+        .template("{prefix:>12.green.bold} [{bar:57}] {pos}/{len} {msg}")
+        .progress_chars("=> ");
 
-    let mut tasks = Tasks::new(progress.add_child("tests"));
+    let m = MultiProgress::new();
 
-    let is_atty = atty::is(atty::Stream::Stdout);
+    let pb_test = m.add(ProgressBar::new(tests.as_slice().len() as _));
+    pb_test.set_style(style.clone());
+    pb_test.set_prefix("Testing");
 
-    let tui = if is_atty {
-        tokio::spawn(prodash::render::tui(
-            std::io::stdout(),
-            progress,
-            Default::default(),
-        )?)
-    } else {
-        spawn_blocking(move || {
-            prodash::render::line(
-                std::io::stdout(),
-                progress,
-                prodash::render::line::Options {
-                    colored: false,
-                    output_is_terminal: false,
-                    keep_running_if_progress_is_empty: false,
-                    ..Default::default()
-                },
-            )
-            .wait();
-        })
-    };
+    let pb_analyze = m.add(ProgressBar::new(5));
+    pb_analyze.set_style(style);
+    pb_analyze.set_prefix("Analyzing");
 
-    let batch = spawn_blocking(move || -> Result<Db> {
-        for test in tests.as_slice() {
-            tasks.insert(test);
-        }
-
+    let batch = thread::spawn(move || -> Result<Db> {
         tests.run(|test| {
-            let mut export: duvet::llvm_coverage::Export = test.run(&project)?;
+            pb_test.set_message(test.name());
 
-            export.trim();
+            let test_entity = db.entities().create()?;
+            // TODO set `test_entity` attributes
 
-            tasks.with(test.id(), |task| {
-                task.inc();
-            });
+            let export: llvm::Export = test.run(&project)?;
 
-            export.load(&db)?;
+            export.load(
+                &db,
+                &llvm::FnVisitor(|_file, _entity| {
+                    // TODO set the `test_entity` attribute
+                    // db.entities().set_attribute(entity, attr, value)?;
+                    Ok(())
+                }),
+            )?;
 
-            tasks.with(test.id(), |task| {
-                task.inc();
-                // we don't need all of the logging in the tui
-                if !is_atty {
-                    task.done("✓");
-                }
-            });
+            pb_test.inc(1);
 
             Ok(())
         })?;
 
-        duvet::rust_src::RustSrc::default().report(&db)?;
+        pb_test.finish_with_message("done");
 
-        db.finish()?;
+        pb_analyze.set_message("Rust source");
+        duvet::rust_src::RustSrc::default().annotate(&db)?;
+        pb_analyze.inc(1);
+
+        pb_analyze.set_message("Highlighting");
+        pb_analyze.set_length(pb_analyze.length() + db.fs().len() as u64);
+        for _ in duvet::highlight::highlight_all(&db) {
+            pb_analyze.inc(1);
+        }
+
+        pb_analyze.set_message("Calculating regions");
+        db.finish_regions()?;
+        pb_analyze.inc(1);
+
+        let mut handler = report::Handler::new(&db);
+
+        pb_analyze.set_message("Calculating notifications");
+        duvet::coverage::notify(&db, types::CODE, types::EXECUTIONS, &mut handler)?;
+        pb_analyze.inc(1);
+
+        pb_analyze.set_message("Finishing notifications");
+        db.finish_notifications()?;
+
+        pb_analyze.finish_with_message("done");
 
         Ok(db)
     });
 
-    tokio::pin!(batch);
-    tokio::pin!(tui);
+    m.join()?;
 
-    tokio::select! {
-        _ = &mut tui => {
-            std::process::exit(1);
-        }
-        _ = &mut batch => {
-        }
-    }
+    drop(batch);
 
     Ok(())
 }
 
-struct Tasks {
-    root: prodash::tree::Item,
-    binaries: HashMap<String, prodash::tree::Item>,
-    tests: HashMap<usize, Mutex<prodash::tree::Item>>,
-}
+mod report {
+    use super::*;
+    use core::ops::Range;
+    use duvet::schema::{EntityId, FileId};
 
-impl Tasks {
-    fn new(root: prodash::tree::Item) -> Self {
-        Self {
-            root,
-            binaries: HashMap::new(),
-            tests: HashMap::new(),
+    pub struct Handler<'a> {
+        db: &'a Db,
+        failure: Arc<dyn notification::Notification>,
+    }
+
+    impl<'a> Handler<'a> {
+        pub fn new(db: &'a Db) -> Self {
+            let failure = Arc::new(notification::Simple {
+                title: "Missing test coverage".to_string(),
+                ..Default::default()
+            });
+            Self { db, failure }
         }
     }
 
-    fn insert(&mut self, test: &test::list::Test) {
-        let root = &mut self.root;
+    impl<'a> coverage::Handler for Handler<'a> {
+        fn on_region_success(
+            &mut self,
+            file: FileId,
+            bytes: Range<u32>,
+            _entity: EntityId,
+            references: &[EntityId],
+        ) -> Result<()> {
+            // TODO list all of the test references
+            let notification: Arc<dyn notification::Notification> =
+                Arc::new(notification::Simple {
+                    title: "Has test coverage".to_string(),
+                    ..Default::default()
+                });
 
-        let binary = self
-            .binaries
-            .entry(test.binary().to_string())
-            .or_insert_with(|| {
-                root.add_child(
-                    test.binary()
-                        .split('/')
-                        .last()
-                        .unwrap()
-                        .split('-')
-                        .next()
-                        .unwrap(),
-                )
-            });
+            let id = self
+                .db
+                .notifications()
+                .create(notification::Level::Success, notification);
 
-        let mut task = binary.add_child(test.name());
-        task.init(Some(2), None);
-        self.tests.insert(test.id(), Mutex::new(task));
-    }
+            self.db.notifications().notify(file, bytes, id)?;
 
-    fn get(&self, id: usize) -> std::sync::MutexGuard<prodash::tree::Item> {
-        self.tests.get(&id).unwrap().lock().unwrap()
-    }
+            Ok(())
+        }
 
-    fn with<F: FnOnce(&mut prodash::tree::Item)>(&self, id: usize, f: F) {
-        f(&mut self.get(id))
+        fn on_region_failure(
+            &mut self,
+            file: FileId,
+            bytes: Range<u32>,
+            _entity: EntityId,
+        ) -> Result<()> {
+            let id = self
+                .db
+                .notifications()
+                .create(notification::Level::Error, self.failure.clone());
+
+            self.db.notifications().notify(file, bytes, id)?;
+
+            Ok(())
+        }
     }
 }
 
