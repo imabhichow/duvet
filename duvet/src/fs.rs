@@ -5,6 +5,7 @@ use crate::{
 use anyhow::{anyhow, Result};
 use byteorder::BigEndian as BE;
 use core::fmt;
+use rayon::prelude::*;
 use sled::{
     transaction::{
         ConflictableTransactionError, ConflictableTransactionResult, TransactionError,
@@ -182,6 +183,29 @@ impl Fs {
 
     pub fn iter(&self) -> Iter {
         Iter(self.id_to_path.iter())
+    }
+
+    pub fn par_for_each<F>(&self, f: F) -> Result<()>
+    where
+        F: Send + Sync + Fn(FileId) -> Result<()>,
+    {
+        // TODO cache this
+        let files = self
+            .id_to_path
+            .iter()
+            .keys()
+            .map(|f| {
+                let (f,) = f?.keys();
+                Ok(f)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        files
+            .par_iter()
+            .map(|id| f(*id))
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(())
     }
 
     fn transaction<F: Fn(Transaction) -> ConflictableTransactionResult<T, anyhow::Error>, T>(

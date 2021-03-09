@@ -4,13 +4,14 @@ use crate::{
 };
 use anyhow::Result;
 use core::ops::Range;
-use sled::Tree;
+use sled::{IVec, Tree};
 use std::{
     io,
     sync::{Arc, Mutex},
 };
 use v_htmlescape::escape as htmlescape;
 use v_jsonescape::escape as jsonescape;
+use zerocopy::LayoutVerified;
 
 attribute!(pub const NOTIFICATION: NotificationId);
 
@@ -130,5 +131,44 @@ impl Notifications {
         })?;
 
         Ok(())
+    }
+
+    pub fn for_file(&self, file: FileId) -> Iter {
+        Iter(self.regions.scan_prefix(file))
+    }
+}
+
+pub struct Iter(sled::Iter);
+
+impl Iterator for Iter {
+    type Item = Result<FileEntry>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(match self.0.next()? {
+            Ok((k, ids)) => {
+                let (_, start, end): (FileId, _, _) = k.keys();
+                let entry = FileEntry { start, end, ids };
+                Ok(entry)
+            }
+            Err(err) => Err(err.into()),
+        })
+    }
+}
+
+pub struct FileEntry {
+    pub start: u32,
+    pub end: u32,
+    ids: IVec,
+}
+
+impl FileEntry {
+    pub fn ids(&self) -> &[NotificationId] {
+        <LayoutVerified<_, [NotificationId]>>::new_slice_unaligned(&self.ids[..])
+            .unwrap()
+            .into_slice()
+    }
+
+    pub fn range(&self) -> Range<u32> {
+        self.start..self.end
     }
 }

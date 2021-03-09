@@ -1,5 +1,6 @@
 use crate::attribute::Value;
 use byteorder::BigEndian as BE;
+use core::fmt;
 use sled::IVec;
 use zerocopy::{byteorder::U32, AsBytes, FromBytes, Unaligned};
 
@@ -12,6 +13,12 @@ macro_rules! id {
         impl $name {
             pub(crate) fn new(value: u32) -> Self {
                 Self(U32::new(value))
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "{}", self.0.get())
             }
         }
 

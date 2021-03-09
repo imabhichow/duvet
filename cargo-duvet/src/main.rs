@@ -79,6 +79,11 @@ fn main() -> Result<()> {
 
         pb_analyze.set_message("Finishing notifications");
         db.finish_notifications()?;
+        pb_analyze.inc(1);
+
+        pb_analyze.set_message("Generating reports");
+        let html = duvet::html::Config::default();
+        db.fs().par_for_each(|file| html.file(&db, file))?;
 
         pb_analyze.finish_with_message("done");
 

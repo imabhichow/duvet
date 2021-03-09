@@ -187,6 +187,7 @@ impl Source {
 }
 
 /// Checked offset
+#[derive(Clone, Copy, Debug)]
 pub struct Offset {
     offset: u32,
     /// Used to look the offset line number back up
@@ -203,8 +204,39 @@ impl<'a> Line<'a> {
         self.offset.offset
     }
 
+    pub fn range(&self) -> core::ops::Range<u32> {
+        let offset = self.offset();
+        offset..offset + self.value.len() as u32
+    }
+
     pub fn line(&self) -> u32 {
         self.offset.line
+    }
+
+    pub fn trim_end(&self) -> Self {
+        Self {
+            value: self.value.trim_end_matches('\r').trim_end_matches('\n'),
+            offset: self.offset,
+        }
+    }
+
+    pub fn split_at_offset(&self, offset: u32) -> (Self, Self) {
+        let line = self.offset.line;
+        let start = self.offset();
+        let index = offset - start;
+        let (a, b) = self.value.split_at(index as usize);
+        let a = Self {
+            value: a,
+            offset: Offset {
+                offset: start,
+                line,
+            },
+        };
+        let b = Self {
+            value: b,
+            offset: Offset { offset, line },
+        };
+        (a, b)
     }
 }
 

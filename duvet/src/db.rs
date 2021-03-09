@@ -1,10 +1,8 @@
 use crate::{
     entity::Entities, fs::Fs, marker::Markers, notification::Notifications, region::Regions,
-    schema::IdSetExt,
 };
 use anyhow::Result;
 use core::fmt;
-use rayon::prelude::*;
 use tempdir::TempDir;
 
 macro_rules! ids {
@@ -80,53 +78,19 @@ impl Db {
     }
 
     pub fn finish_regions(&self) -> Result<()> {
-        let files = self
-            .fs()
-            .id_to_path
-            .iter()
-            .keys()
-            .map(|f| {
-                let (f,) = f?.keys();
-                Ok(f)
-            })
-            .collect::<Result<Vec<_>>>()?;
-
         let regions = self.regions();
-
-        files
-            .par_iter()
-            .map(|file| {
-                regions.finish_file(*file)?;
-                Ok(())
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        Ok(())
+        self.fs().par_for_each(|id| {
+            regions.finish_file(id)?;
+            Ok(())
+        })
     }
 
     pub fn finish_notifications(&self) -> Result<()> {
-        let files = self
-            .fs()
-            .id_to_path
-            .iter()
-            .keys()
-            .map(|f| {
-                let (f,) = f?.keys();
-                Ok(f)
-            })
-            .collect::<Result<Vec<_>>>()?;
-
         let notifications = self.notifications();
-
-        files
-            .par_iter()
-            .map(|file| {
-                notifications.finish_file(*file)?;
-                Ok(())
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        Ok(())
+        self.fs().par_for_each(|id| {
+            notifications.finish_file(id)?;
+            Ok(())
+        })
     }
 
     pub fn entities(&self) -> &Entities {
