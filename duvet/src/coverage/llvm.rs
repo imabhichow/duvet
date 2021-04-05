@@ -1,23 +1,20 @@
-use crate::{
-    db::Db,
-    schema::{EntityId, FileId},
-    types::EXECUTIONS,
-};
+use crate::{db::Db, schema::FileId};
 use anyhow::{Context, Result};
+use core::ops::Range;
 use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::Path;
 
 pub trait EntityVisitor: Sync {
-    fn on_entity(&self, file: FileId, entity: EntityId) -> Result<()>;
+    fn on_region(&self, file: FileId, region: Range<u32>, execution_count: u64) -> Result<()>;
 }
 
-pub struct FnVisitor<F: Sync + Fn(FileId, EntityId) -> Result<()>>(pub F);
+pub struct FnVisitor<F: Sync + Fn(FileId, Range<u32>, u64) -> Result<()>>(pub F);
 
-impl<F: Sync + Fn(FileId, EntityId) -> Result<()>> EntityVisitor for FnVisitor<F> {
-    fn on_entity(&self, file: FileId, entity: EntityId) -> Result<()> {
-        (self.0)(file, entity)
+impl<F: Sync + Fn(FileId, Range<u32>, u64) -> Result<()>> EntityVisitor for FnVisitor<F> {
+    fn on_region(&self, file: FileId, region: Range<u32>, execution_count: u64) -> Result<()> {
+        (self.0)(file, region, execution_count)
     }
 }
 
@@ -38,9 +35,9 @@ impl Export {
         self.data.retain(|data: &Data| !data.is_empty())
     }
 
-    pub fn load<V: EntityVisitor>(&self, db: &Db, visitor: &V) -> Result<()> {
+    pub fn visit<V: EntityVisitor>(&self, db: &Db, visitor: &V) -> Result<()> {
         for data in &self.data {
-            data.load(db, visitor)?;
+            data.visit(db, visitor)?;
         }
         Ok(())
     }
@@ -67,15 +64,11 @@ impl Data {
         is_empty
     }
 
-    pub fn load<V: EntityVisitor>(&self, db: &Db, visitor: &V) -> Result<()> {
-        if self.is_empty() {
-            return Ok(());
-        }
-
+    pub fn visit<V: EntityVisitor>(&self, db: &Db, visitor: &V) -> Result<()> {
         self.files
             .par_iter()
-            .map(|f| f.load(db))
-            .chain(self.functions.par_iter().map(|f| f.load(db, visitor)))
+            .map(|f| f.visit(db))
+            .chain(self.functions.par_iter().map(|f| f.visit(db, visitor)))
             .collect::<Result<Vec<_>>>()?;
 
         Ok(())
@@ -95,11 +88,12 @@ impl File {
         self.filename.starts_with('/')
     }
 
-    pub fn load(&self, db: &Db) -> Result<()> {
+    pub fn visit(&self, _db: &Db) -> Result<()> {
         if self.is_external() {
             return Ok(());
         }
 
+        /*
         let file = db
             .fs()
             .load_file(Path::new(&self.filename))
@@ -108,6 +102,8 @@ impl File {
         for segment in &self.segments {
             segment.load(db, file)?;
         }
+        */
+
         Ok(())
     }
 }
@@ -132,8 +128,8 @@ impl Function {
             .all(|filename| filename.starts_with('/'))
     }
 
-    pub fn load<V: EntityVisitor>(&self, db: &Db, visitor: &V) -> Result<()> {
-        if self.is_empty() {
+    pub fn visit<V: EntityVisitor>(&self, db: &Db, visitor: &V) -> Result<()> {
+        if self.is_external() {
             return Ok(());
         }
 
@@ -149,7 +145,7 @@ impl Function {
 
         for file in files {
             for region in &self.regions {
-                region.load(db, file, visitor)?;
+                region.visit(db, file, visitor)?;
             }
         }
 
@@ -177,7 +173,7 @@ pub struct Segment {
 }
 
 impl Segment {
-    pub fn load(&self, db: &Db, file: FileId) -> Result<()> {
+    pub fn load(&self, _db: &Db, _file: FileId) -> Result<()> {
         // TODO
         Ok(())
     }
@@ -196,11 +192,7 @@ pub struct Region {
 }
 
 impl Region {
-    pub fn load<V: EntityVisitor>(&self, db: &Db, file: FileId, visitor: &V) -> Result<()> {
-        if self.execution_count == 0 {
-            return Ok(());
-        }
-
+    pub fn visit<V: EntityVisitor>(&self, db: &Db, file: FileId, visitor: &V) -> Result<()> {
         let offsets = db
             .fs()
             .map_line_column(
@@ -213,11 +205,7 @@ impl Region {
             )
             .unwrap();
 
-        let entity = db.entities().create()?;
-        db.entities()
-            .set_attribute(entity, EXECUTIONS, self.execution_count)?;
-        visitor.on_entity(file, entity)?;
-        db.regions().insert(file, offsets, entity)?;
+        visitor.on_region(file, offsets, self.execution_count)?;
 
         Ok(())
     }

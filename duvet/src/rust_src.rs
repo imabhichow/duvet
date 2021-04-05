@@ -19,7 +19,12 @@ pub struct Config {
 impl RustSrc {
     pub fn annotate(&self, db: &Db) -> Result<()> {
         for file in db.fs().iter() {
-            let (file, _path) = file?;
+            let (file, path) = file?;
+
+            if !path.ends_with(".rs") {
+                continue;
+            }
+
             let content = db.fs().open(file)?;
             match syn::parse_file(&content) {
                 Ok(ast) => {
@@ -141,7 +146,13 @@ macro_rules! span {
 impl<'a, 'ast> Visit<'ast> for Visitor<'a> {
     fn visit_arm(&mut self, i: &'ast syn::Arm) {
         let mode = self.on_attrs(&i.attrs);
-        visit::visit_arm(self, i);
+
+        if let Some((_, guard)) = i.guard.as_ref() {
+            visit::visit_expr(self, guard);
+        }
+
+        visit::visit_expr(self, &i.body);
+
         self.mode = mode;
     }
 
@@ -222,7 +233,6 @@ impl<'a, 'ast> Visit<'ast> for Visitor<'a> {
 
     fn visit_expr_cast(&mut self, i: &'ast syn::ExprCast) {
         let mode = self.on_attrs(&i.attrs);
-        span!(self, i.as_token);
         visit::visit_expr_cast(self, i);
         self.mode = mode;
     }
@@ -249,7 +259,6 @@ impl<'a, 'ast> Visit<'ast> for Visitor<'a> {
 
     fn visit_expr_for_loop(&mut self, i: &'ast syn::ExprForLoop) {
         let mode = self.on_attrs(&i.attrs);
-        span!(self, i.label, i.for_token);
         visit::visit_expr_for_loop(self, i);
         self.mode = mode;
     }
@@ -275,7 +284,6 @@ impl<'a, 'ast> Visit<'ast> for Visitor<'a> {
 
     fn visit_expr_let(&mut self, i: &'ast syn::ExprLet) {
         let mode = self.on_attrs(&i.attrs);
-        span!(self, i.let_token);
         visit::visit_expr_let(self, i);
         self.mode = mode;
     }
@@ -288,7 +296,6 @@ impl<'a, 'ast> Visit<'ast> for Visitor<'a> {
 
     fn visit_expr_loop(&mut self, i: &'ast syn::ExprLoop) {
         let mode = self.on_attrs(&i.attrs);
-        span!(self, i.label, i.loop_token);
         visit::visit_expr_loop(self, i);
         self.mode = mode;
     }
@@ -358,7 +365,6 @@ impl<'a, 'ast> Visit<'ast> for Visitor<'a> {
 
     fn visit_expr_return(&mut self, i: &'ast syn::ExprReturn) {
         let mode = self.on_attrs(&i.attrs);
-        span!(self, i.return_token);
         visit::visit_expr_return(self, i);
         self.mode = mode;
     }
@@ -407,14 +413,12 @@ impl<'a, 'ast> Visit<'ast> for Visitor<'a> {
     fn visit_expr_unsafe(&mut self, i: &'ast syn::ExprUnsafe) {
         let mode = self.on_attrs(&i.attrs);
         // TODO add unsafe entity
-        span!(self, i.unsafe_token);
         visit::visit_expr_unsafe(self, i);
         self.mode = mode;
     }
 
     fn visit_expr_while(&mut self, i: &'ast syn::ExprWhile) {
         let mode = self.on_attrs(&i.attrs);
-        span!(self, i.label, i.while_token);
         visit::visit_expr_while(self, i);
         self.mode = mode;
     }
@@ -450,6 +454,8 @@ impl<'a, 'ast> Visit<'ast> for Visitor<'a> {
     }
 
     fn visit_impl_item_method(&mut self, i: &'ast syn::ImplItemMethod) {
+        let mode = self.on_attrs(&i.attrs);
+
         let parent = self.entity;
         self.entity = self.db.entities().create().unwrap();
 
@@ -459,13 +465,15 @@ impl<'a, 'ast> Visit<'ast> for Visitor<'a> {
             .entities()
             .set_attribute(self.entity, types::FUNCTION, ())
             .unwrap();
-
-        let parent_mode = self.on_attrs(&i.attrs);
+        self.db
+            .entities()
+            .set_attribute(self.entity, self.mode.1, ())
+            .unwrap();
 
         visit::visit_impl_item_method(self, i);
 
         self.entity = parent;
-        self.mode = parent_mode;
+        self.mode = mode;
     }
 
     fn visit_impl_item_type(&mut self, _: &'ast syn::ImplItemType) {
@@ -487,6 +495,10 @@ impl<'a, 'ast> Visit<'ast> for Visitor<'a> {
         self.db
             .entities()
             .set_attribute(self.entity, types::FUNCTION, ())
+            .unwrap();
+        self.db
+            .entities()
+            .set_attribute(self.entity, self.mode.1, ())
             .unwrap();
 
         visit::visit_item_fn(self, i);
@@ -557,15 +569,35 @@ impl<'a, 'ast> Visit<'ast> for Visitor<'a> {
 
     fn visit_local(&mut self, i: &'ast syn::Local) {
         let mode = self.on_attrs(&i.attrs);
-        span!(self, i.let_token);
         visit::visit_local(self, i);
         self.mode = mode;
     }
 
     fn visit_macro(&mut self, i: &'ast syn::Macro) {
-        // TODO change mode when panic, unreachable, assert_eq, debug_assert_eq, dbg, etc
+        for ident in [
+            "panic",
+            "unreachable",
+            "assert",
+            "assert_eq",
+            "assert_ne",
+            "debug_assert",
+            "debug_assert_eq",
+            "debug_assert_ne",
+        ]
+        .iter()
+        {
+            if i.path.is_ident(ident) {
+                // TODO mark as an assertion
+                return;
+            }
+        }
+
         span!(self, i.path, i.bang_token);
         visit::visit_macro(self, i);
+    }
+
+    fn visit_signature(&mut self, i: &'ast syn::Signature) {
+        span!(self, i.ident);
     }
 
     fn visit_trait_item_const(&mut self, _: &'ast syn::TraitItemConst) {
@@ -578,6 +610,11 @@ impl<'a, 'ast> Visit<'ast> for Visitor<'a> {
     }
 
     fn visit_trait_item_method(&mut self, i: &'ast syn::TraitItemMethod) {
+        // don't mark empty methods
+        if i.default.is_none() {
+            return;
+        }
+
         let mode = self.on_attrs(&i.attrs);
 
         let parent = self.entity;
@@ -588,6 +625,10 @@ impl<'a, 'ast> Visit<'ast> for Visitor<'a> {
         self.db
             .entities()
             .set_attribute(self.entity, types::FUNCTION, ())
+            .unwrap();
+        self.db
+            .entities()
+            .set_attribute(self.entity, self.mode.1, ())
             .unwrap();
 
         visit::visit_trait_item_method(self, i);

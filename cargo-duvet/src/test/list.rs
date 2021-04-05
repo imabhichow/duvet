@@ -2,27 +2,26 @@ use crate::{
     process::{exec, Command, StatusAsResult},
     project::Project,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use rayon::prelude::*;
-use std::path::{Path, PathBuf};
-
-fn dir() -> PathBuf {
-    Path::new("target").join("cargo-duvet")
-}
 
 #[derive(Debug)]
 pub struct List {
     tests: Vec<Test>,
+    binaries: Vec<String>,
 }
 
 impl List {
     pub fn from_project(project: &Project) -> Result<Self> {
+        let build_profraw = project.profraw_file(&"build");
+        std::fs::create_dir_all(build_profraw.parent().unwrap())?;
+
         // build everything first
         let mut build = project.cargo("test");
         build
             .arg("--all")
             .arg("--no-run")
-            .env("LLVM_PROFILE_FILE", dir().join("_build.profdata"));
+            .env("LLVM_PROFILE_FILE", &build_profraw);
         exec(build)?;
 
         let mut list = project.cargo("test");
@@ -32,7 +31,7 @@ impl List {
             .arg("--list")
             .arg("--format")
             .arg("terse")
-            .env("LLVM_PROFILE_FILE", dir().join("_list.profdata"));
+            .env("LLVM_PROFILE_FILE", &build_profraw);
 
         let result = list
             .output()
@@ -40,16 +39,21 @@ impl List {
             .status_as_result()
             .expect("list should always work");
 
-        let binaries: Vec<_> = find_binary_paths(&result.stderr).collect();
+        let binaries: Vec<_> = find_binary_paths(&result.stderr)
+            .map(String::from)
+            .collect();
 
         let mut tests = binaries
             .par_iter()
-            .flat_map(|binary| {
+            .enumerate()
+            .flat_map(|(id, binary)| {
+                let list_profraw = project.profraw_file(&format!("list_{}", id));
+
                 let mut list = Command::new(binary);
                 list.arg("--list")
                     .arg("--format")
                     .arg("terse")
-                    .env("LLVM_PROFILE_FILE", dir().join("_list.profdata"));
+                    .env("LLVM_PROFILE_FILE", &list_profraw);
 
                 let result = list
                     .output()
@@ -81,11 +85,21 @@ impl List {
             test.id = id;
         }
 
-        Ok(Self { tests })
+        Ok(Self { tests, binaries })
     }
 
     pub fn as_slice(&self) -> &[Test] {
         &self.tests
+    }
+
+    pub fn profdata<'a, T: serde::de::DeserializeOwned>(
+        &'a self,
+        project: &'a Project,
+    ) -> impl Iterator<Item = Result<T>> + 'a {
+        self.binaries
+            .iter()
+            .enumerate()
+            .map(move |(id, bin)| project.profdata(bin, &format!("list_{}", id)))
     }
 
     pub fn run<F>(&self, run: F) -> Result<()>
@@ -132,8 +146,7 @@ impl Test {
 
     pub fn run<T: serde::de::DeserializeOwned>(&self, project: &Project) -> Result<T> {
         let mut test = Command::new(&self.binary);
-        let profraw = dir().join(format!("{}.profraw", self.id));
-        let profdata = dir().join(format!("{}.profdata", self.id));
+        let profraw = project.profraw_file(&self.id);
 
         test.arg("--exact")
             .arg(&self.name)
@@ -147,29 +160,7 @@ impl Test {
             ));
         }
 
-        let mut merge = project.llvm_bin("llvm-profdata");
-        merge
-            .arg("merge")
-            .arg("-sparse")
-            .arg(&profraw)
-            .arg("-o")
-            .arg(&profdata);
-
-        exec(merge).context("while calling llvm-profdata")?;
-
-        // llvm-cov is not included with rustup
-        let mut export = Command::new("llvm-cov");
-        export
-            .arg("export")
-            .arg(&self.binary)
-            .arg("-instr-profile")
-            .arg(&profdata)
-            .arg("-format=text")
-            .arg("-num-threads=1");
-
-        let result = export.output()?.status_as_result()?;
-        let coverage = serde_json::from_slice(&result.stdout)?;
-        Ok(coverage)
+        project.profdata(&self.binary, &self.id)
     }
 }
 
@@ -195,7 +186,13 @@ fn find_binary_paths(stderr: &[u8]) -> impl Iterator<Item = &str> {
                 let line = line.trim();
                 let mut line = line.split("Running ");
                 line.next()?;
-                line.next()
+                let v = line.next()?;
+                if v.ends_with(')') {
+                    let v = v.split('(').last()?;
+                    Some(&v[..v.len() - 1])
+                } else {
+                    Some(v)
+                }
             })
         })
         .into_iter()

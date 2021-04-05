@@ -1,11 +1,14 @@
 use anyhow::Result;
 use duvet::{
+    attribute,
     coverage::{self, llvm},
     db::Db,
     notification, types,
 };
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::{sync::Arc, thread};
+
+attribute!(const TEST_ID: u32);
 
 mod manifest;
 mod process;
@@ -24,6 +27,8 @@ fn main() -> Result<()> {
 
     let m = MultiProgress::new();
 
+    m.set_draw_target(indicatif::ProgressDrawTarget::stdout());
+
     let pb_test = m.add(ProgressBar::new(tests.as_slice().len() as _));
     pb_test.set_style(style.clone());
     pb_test.set_prefix("Testing");
@@ -32,20 +37,41 @@ fn main() -> Result<()> {
     pb_analyze.set_style(style);
     pb_analyze.set_prefix("Analyzing");
 
+    let llvm_code = db.entities().create()?;
+    db.entities()
+        .set_attribute(llvm_code, duvet::types::CODE, ())?;
+
+    // mark significant lines
+    for data in tests.profdata(&project) {
+        let export: llvm::Export = data?;
+        export.visit(
+            &db,
+            &llvm::FnVisitor(|file, bytes, _execution_count| {
+                db.regions().insert(file, bytes, llvm_code)?;
+                Ok(())
+            }),
+        )?;
+    }
+
     let batch = thread::spawn(move || -> Result<Db> {
         tests.run(|test| {
             pb_test.set_message(test.name());
 
             let test_entity = db.entities().create()?;
-            // TODO set `test_entity` attributes
+            db.entities()
+                .set_attribute(test_entity, TEST_ID, test.id() as u32)?;
+            db.entities()
+                .set_attribute(test_entity, duvet::types::TEST_REGION, ())?;
 
             let export: llvm::Export = test.run(&project)?;
 
-            export.load(
+            export.visit(
                 &db,
-                &llvm::FnVisitor(|_file, _entity| {
-                    // TODO set the `test_entity` attribute
-                    // db.entities().set_attribute(entity, attr, value)?;
+                &llvm::FnVisitor(|file, bytes, execution_count| {
+                    if execution_count > 0 {
+                        // TODO save execution count
+                        db.regions().insert(file, bytes, test_entity)?;
+                    }
                     Ok(())
                 }),
             )?;
@@ -57,9 +83,11 @@ fn main() -> Result<()> {
 
         pb_test.finish_with_message("done");
 
+        /*
         pb_analyze.set_message("Rust source");
         duvet::rust_src::RustSrc::default().annotate(&db)?;
         pb_analyze.inc(1);
+        */
 
         pb_analyze.set_message("Highlighting");
         pb_analyze.set_length(pb_analyze.length() + db.fs().len() as u64);
@@ -71,10 +99,10 @@ fn main() -> Result<()> {
         db.finish_regions()?;
         pb_analyze.inc(1);
 
-        let mut handler = report::Handler::new(&db);
+        let mut handler = report::Handler::new(&db, &tests);
 
         pb_analyze.set_message("Calculating notifications");
-        duvet::coverage::notify(&db, types::CODE, types::EXECUTIONS, &mut handler)?;
+        duvet::coverage::notify(&db, types::CODE, types::TEST_REGION, &mut handler)?;
         pb_analyze.inc(1);
 
         pb_analyze.set_message("Finishing notifications");
@@ -101,19 +129,27 @@ mod report {
     use super::*;
     use core::ops::Range;
     use duvet::schema::{EntityId, FileId};
+    use test::list::List;
 
     pub struct Handler<'a> {
         db: &'a Db,
+        tests: &'a List,
         failure: Arc<dyn notification::Notification>,
+        failure_id: Option<notification::Id>,
     }
 
     impl<'a> Handler<'a> {
-        pub fn new(db: &'a Db) -> Self {
+        pub fn new(db: &'a Db, tests: &'a List) -> Self {
             let failure = Arc::new(notification::Simple {
                 title: "Missing test coverage".to_string(),
                 ..Default::default()
             });
-            Self { db, failure }
+            Self {
+                db,
+                tests,
+                failure,
+                failure_id: None,
+            }
         }
     }
 
@@ -148,10 +184,16 @@ mod report {
             bytes: Range<u32>,
             _entity: EntityId,
         ) -> Result<()> {
-            let id = self
-                .db
-                .notifications()
-                .create(notification::Level::Error, self.failure.clone());
+            let id = if let Some(id) = self.failure_id {
+                id
+            } else {
+                let id = self
+                    .db
+                    .notifications()
+                    .create(notification::Level::Error, self.failure.clone());
+                self.failure_id = Some(id);
+                id
+            };
 
             self.db.notifications().notify(file, bytes, id)?;
 

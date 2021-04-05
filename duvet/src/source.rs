@@ -215,8 +215,21 @@ impl<'a> Line<'a> {
 
     pub fn trim_end(&self) -> Self {
         Self {
-            value: self.value.trim_end_matches('\r').trim_end_matches('\n'),
+            value: self.value.trim_end(),
             offset: self.offset,
+        }
+    }
+
+    pub fn trim_start(&self) -> Self {
+        let prev_len = self.value.len();
+        let value = self.value.trim_start();
+        let diff = prev_len - value.len();
+        Self {
+            value,
+            offset: Offset {
+                line: self.offset.line,
+                offset: self.offset.offset + diff as u32,
+            },
         }
     }
 

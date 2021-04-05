@@ -1,8 +1,8 @@
 use crate::{
     manifest::Manifest,
-    process::{Command, StatusAsResult},
+    process::{exec, Command, StatusAsResult},
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 pub struct Builder {
@@ -10,6 +10,7 @@ pub struct Builder {
     pub manifest_path: Option<PathBuf>,
     pub release: bool,
     pub target: String,
+    pub profdata_dir: PathBuf,
 }
 
 impl Default for Builder {
@@ -19,6 +20,7 @@ impl Default for Builder {
             manifest_path: None,
             release: false,
             target: env!("DEFAULT_TARGET").to_owned(),
+            profdata_dir: PathBuf::new().join("target/cargo-duvet/data"),
         }
     }
 }
@@ -34,6 +36,7 @@ impl Builder {
             manifest_path,
             release,
             target,
+            profdata_dir,
         } = self;
 
         Ok(Project {
@@ -44,6 +47,7 @@ impl Builder {
             toolchain,
             release,
             target,
+            profdata_dir,
         })
     }
 
@@ -108,6 +112,7 @@ pub struct Project {
     pub release: bool,
     pub llvm_dir: PathBuf,
     pub target: String,
+    pub profdata_dir: PathBuf,
 }
 
 impl Project {
@@ -149,5 +154,45 @@ impl Project {
             crate::process::exec(cmd)?;
         }
         Ok(())
+    }
+
+    pub fn profraw_file<I: core::fmt::Display>(&self, id: &I) -> PathBuf {
+        self.profdata_dir.join(format!("{}.profraw", id))
+    }
+
+    pub fn profdata_file<I: core::fmt::Display>(&self, id: &I) -> PathBuf {
+        self.profdata_dir.join(format!("{}.profdata", id))
+    }
+
+    pub fn profdata<I: core::fmt::Display, T: serde::de::DeserializeOwned>(
+        &self,
+        binary: &str,
+        id: &I,
+    ) -> Result<T> {
+        let profraw = self.profraw_file(id);
+        let profdata = self.profdata_file(id);
+
+        let mut merge = self.llvm_bin("llvm-profdata");
+        merge
+            .arg("merge")
+            .arg("-sparse")
+            .arg(&profraw)
+            .arg("-o")
+            .arg(&profdata);
+
+        exec(merge).context("while calling llvm-profdata")?;
+
+        let mut export = self.llvm_bin("llvm-cov");
+        export
+            .arg("export")
+            .arg(binary)
+            .arg("-instr-profile")
+            .arg(&profdata)
+            .arg("-format=text")
+            .arg("-num-threads=1");
+
+        let result = export.output()?.status_as_result()?;
+        let coverage = serde_json::from_slice(&result.stdout)?;
+        Ok(coverage)
     }
 }

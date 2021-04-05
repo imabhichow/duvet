@@ -74,14 +74,29 @@ impl Config {
             write!(out, "<div id=L{}>", line.line())?;
 
             let line = line.trim_end();
+            if line.is_empty() {
+                write!(out, "<br/></div>")?;
+                continue;
+            }
 
-            line_regions(line, &mut notifications, |region| {
+            let content = line.trim_start();
+            let whitespace = line.len() - content.len();
+            if whitespace > 0 {
+                write!(out, "{}", &line[..whitespace])?;
+            }
+
+            line_regions(content, &mut notifications, |region| {
                 used.extend(region.ids);
-                write!(out, "<span")?;
                 if let Some(notifications) = region.notifications(db) {
-                    write!(out, " data-n={}", notifications)?;
+                    write!(
+                        out,
+                        "<span data-n={}>{}</span>",
+                        notifications,
+                        htmlescape(region.content)
+                    )?;
+                } else {
+                    write!(out, "{}", htmlescape(region.content))?;
                 }
-                write!(out, ">{}</span>", htmlescape(region.content))?;
                 Ok(())
             })?;
             write!(out, "</div>")?;
@@ -91,9 +106,9 @@ impl Config {
         write!(out, "<div class=notifications>")?;
         for id in used {
             let (level, notification) = db.notifications().get(id);
-            write!(out, "<div id=n{} class={}>", id, level_id(level))?;
+            write!(out, "<template id=n{}><div class={}>", id, level_id(level))?;
             notification.html(&mut out)?;
-            write!(out, "</div>")?;
+            write!(out, "</div></template>")?;
         }
         write!(out, "</div>")?;
 
@@ -111,37 +126,73 @@ fn line_regions<F: FnMut(Region) -> Result<()>>(
     notifications: &mut core::iter::Peekable<notification::Iter>,
     mut f: F,
 ) -> Result<()> {
-    while !line.is_empty() {
-        if let Some(n) = notifications.peek().and_then(|n| {
-            let n = n.as_ref().unwrap();
-            if n.range().contains(&line.offset()) {
-                Some(n)
-            } else {
-                None
+    use core::cmp::Ordering::*;
+
+    while let Some(not) = notifications.peek() {
+        if line.is_empty() {
+            return Ok(());
+        }
+
+        let not = not.as_ref().unwrap();
+        let line_range = line.range();
+        let n_range = not.range();
+        match (
+            line_range.start.cmp(&n_range.start),
+            line_range.end.cmp(&n_range.end),
+        ) {
+            // notifications don't come until later
+            (Less, Less) => {
+                break;
             }
-        }) {
-            let line_range = line.range();
-            let n_range = n.range();
-            let end = line_range.end.min(n_range.end);
-
-            f(Region {
-                content: &line[0..(end - line.offset()) as usize],
-                ids: n.ids(),
-            })?;
-
-            let (_, l) = line.split_at_offset(end);
-            line = l;
-
-            if n_range.end == end {
+            // notifications have passed
+            (Greater, Greater) => {
                 notifications.next().unwrap()?;
             }
-        } else {
-            f(Region {
-                content: &*line,
-                ids: &[],
-            })?;
-            return Ok(());
-        };
+            // notification comes later in the line
+            (Less, Equal) | (Less, Greater) => {
+                let end = line_range.end.min(n_range.start);
+
+                f(Region {
+                    content: &line[0..(end - line.offset()) as usize],
+                    ids: &[],
+                })?;
+
+                let (_, l) = line.split_at_offset(end);
+                line = l;
+            }
+            // overlap
+            (Greater, Less) | (Equal, Less) => {
+                let end = line_range.end.min(n_range.end);
+
+                f(Region {
+                    content: &line[0..(end - line.offset()) as usize],
+                    ids: not.ids(),
+                })?;
+
+                let (_, l) = line.split_at_offset(end);
+                line = l;
+            }
+            // overlap and next
+            (_, Equal) | (_, Greater) => {
+                let end = line_range.end.min(n_range.end);
+
+                f(Region {
+                    content: &line[0..(end - line.offset()) as usize],
+                    ids: not.ids(),
+                })?;
+
+                let (_, l) = line.split_at_offset(end);
+                line = l;
+                notifications.next().unwrap()?;
+            }
+        }
+    }
+
+    if !line.is_empty() {
+        f(Region {
+            content: &*line,
+            ids: &[],
+        })?;
     }
 
     Ok(())
