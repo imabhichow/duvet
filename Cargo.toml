@@ -1,7 +1,8 @@
 [workspace]
 members = [
     "duvet",
-    "cargo-duvet",
+    "duvet-core",
+    "duvet-core/examples/line-count"
 ]
 
 [profile.release]

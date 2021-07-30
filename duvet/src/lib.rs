@@ -1,21 +1,24 @@
-#[macro_use]
-pub mod attribute;
+use duvet_core::{database::Offline, diagnostics, Database as _};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
-mod marker;
+type Result<V, E = Error> = core::result::Result<V, E>;
+type Error = anyhow::Error;
 
-pub mod coverage;
-pub mod db;
-pub mod entity;
-pub mod fs;
-pub mod html;
-pub mod notification;
-pub mod region;
-pub mod schema;
-pub mod source;
-pub mod types;
+mod manifest;
 
-#[cfg(feature = "highlight")]
-pub mod highlight;
+pub struct Database(Offline);
 
-#[cfg(feature = "rust-src")]
-pub mod rust_src;
+impl Database {
+    pub fn new(root: PathBuf) -> Self {
+        let loader = Arc::new(manifest::Loader { root });
+        let db = duvet_core::database::Offline::new(loader);
+        Self(db)
+    }
+
+    pub fn path_diagnostics(&self, path: &Path) -> diagnostics::Set {
+        self.0.path_diagnostics(path)
+    }
+}

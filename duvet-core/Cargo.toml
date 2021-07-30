@@ -1,0 +1,17 @@
+[package]
+name = "duvet-core"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+bytes = "1"
+dashmap = "4"
+globset = "0.4"
+# TODO remove this once virtual walking is implemented
+ignore = "0.4"
+notify = "4"
+rayon = "1"
+ropey = "1"
+salsa = "0.16"
+serde = { version = "1", features = ["derive"] }
+toml = "0.5"

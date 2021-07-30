@@ -6,32 +6,18 @@ description = "Rich code coverage"
 license = "MIT"
 edition = "2018"
 
-[features]
-default = ["fetch", "llvm-coverage", "highlight", "rust-src"]
-fetch = ["reqwest"]
-highlight = ["syntect"]
-llvm-coverage = ["rustc-demangle", "serde/derive", "serde_json", "serde_tuple"]
-rust-src = ["proc-macro2", "syn"]
-
 [dependencies]
 anyhow = "1"
-byteorder = "1"
-const-sha1 = "0.2"
-lazy_static = "1"
-proc-macro2 = { version = "1", features = ["span-locations"], optional = true }
+globset = "0.4"
+duvet-core = { version = "0.1", path = "../duvet-core" }
 rayon = "1"
-reqwest = { version = "0.11", features = ["blocking"], optional = true }
-rustc-demangle = { version = "0.1", optional = true }
+reqwest = { version = "0.11", features = ["blocking"] }
 serde = { version = "1" }
 serde_json = { version = "1", optional = true }
-serde_tuple = { version = "0.5", optional = true }
-sled = "0.34"
-syn = { version = "1", features = ["full", "extra-traits", "visit"], optional = true }
-syntect = { version = "4", optional = true }
 tempdir = "0.3"
+toml = "0.5"
 v_htmlescape = "0.13"
 v_jsonescape = "0.5"
-zerocopy = "0.3"
 
 [dev-dependencies]
 bolero = "0.6"

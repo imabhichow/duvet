@@ -1,0 +1,20 @@
+version = "1"
+
+[[compliance.source]]
+patterns = ["src/**/*.rs"]
+comment-style = { meta = "//=", content = "//#" }
+
+[[compliance.requirement]]
+patterns = ["specs/**/*.toml"]
+
+[[compliance.spec.markdown]]
+patterns = ["docs/**/*.md"]
+
+[[compliance.spec.ietf]]
+id = "quic-transport"
+title = "QUIC: A UDP-Based Multiplexed and Secure Transport"
+url = "https://www.rfc-editor.org/rfc/rfc9000.txt"
+aliases = [
+    "https://datatracker.ietf.org/doc/html/rfc9000",
+    "https://www.rfc-editor.org/rfc/rfc9000.html"
+]
