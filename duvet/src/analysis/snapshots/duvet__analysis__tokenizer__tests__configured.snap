@@ -1,0 +1,25 @@
+---
+source: duvet/src/analysis/tokenizer.rs
+assertion_line: 233
+expression: "parser.parse(&arcstr::literal!(r#\"\n        /*\n         *= meta=goes here\n         *# content goes here\n         */\n        \"#))"
+
+---
+Tokens(
+    [
+        Meta {
+            location: Location {
+                line: 2,
+                indent: 9,
+            },
+            key: "meta",
+            value: "goes here",
+        },
+        Content {
+            location: Location {
+                line: 3,
+                indent: 9,
+            },
+            value: " content goes here",
+        },
+    ],
+)

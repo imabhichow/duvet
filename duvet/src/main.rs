@@ -1,9 +1,24 @@
-use std::path::Path;
+use duvet::{Database, Loader};
+use std::path::PathBuf;
 
-use duvet::Database;
+#[derive(Debug)]
+enum Arguments {
+    Extract(Extract),
+    Report(Report),
+}
+
+#[derive(Debug)]
+struct Extract {
+    manifest_path: PathBuf,
+}
+
+#[derive(Debug)]
+struct Report {
+    // TODO
+}
 
 fn main() {
-    let manifest = std::env::current_dir().unwrap().join("duvet.toml");
-    let db = Database::new(manifest);
-    eprintln!("{:#?}", db.path_diagnostics(Path::new(file!())));
+    let root = std::env::current_dir().unwrap().join("duvet.toml");
+    let db = Database::new(Loader { root });
+    db.report_all();
 }

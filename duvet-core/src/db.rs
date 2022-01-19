@@ -2,10 +2,11 @@ use crate::{
     analyze::{
         mapper::{self, map_category, map_path, map_path_category},
         reducer::{self, reduce, reduce_category},
+        reporter::{self, report, report_all},
     },
     api,
     manifest::{self, manifest, manifest_sources, mapper_sources, Manifest},
-    report::{diagnose_path, Set},
+    report::{diagnose_path, Map as ReportMap, MultiList},
     vfs::{self, vfs_read},
 };
 
@@ -30,7 +31,11 @@ pub trait Db: salsa::Database + vfs::Filesystem + manifest::DbLoader {
 
     fn reduce_category(&self, ty: reducer::Category) -> reducer::Set;
 
-    fn diagnose_path(&self, path: vfs::PathId) -> Set;
+    fn report(&self, analyzer: reporter::Analyzer) -> ReportMap;
+
+    fn report_all(&self) -> ReportMap;
+
+    fn diagnose_path(&self, path: vfs::PathId) -> MultiList;
 
     /// Reads a file from the file system
     fn vfs_read(&self, path: vfs::PathId) -> vfs::Node;
@@ -58,8 +63,12 @@ pub mod offline {
     }
 
     impl api::Database for Offline {
-        fn path_diagnostics(&self, path: &Path) -> api::diagnostics::Set {
+        fn path_diagnostics(&self, path: &Path) -> api::diagnostics::MultiList {
             self.0.path_diagnostics(path)
+        }
+
+        fn report_all(&self) -> api::diagnostics::Map {
+            api::Database::report_all(&self.0)
         }
     }
 
@@ -73,9 +82,13 @@ pub mod offline {
     impl salsa::Database for Inner {}
 
     impl api::Database for Inner {
-        fn path_diagnostics(&self, path: &Path) -> api::diagnostics::Set {
+        fn path_diagnostics(&self, path: &Path) -> api::diagnostics::MultiList {
             let path = self.paths.intern(path);
             self.diagnose_path(path)
+        }
+
+        fn report_all(&self) -> crate::diagnostics::Map {
+            Db::report_all(self)
         }
     }
 
@@ -136,8 +149,12 @@ pub mod online {
     }
 
     impl api::Database for Online {
-        fn path_diagnostics(&self, path: &Path) -> api::diagnostics::Set {
+        fn path_diagnostics(&self, path: &Path) -> api::diagnostics::MultiList {
             self.0.path_diagnostics(path)
+        }
+
+        fn report_all(&self) -> crate::diagnostics::Map {
+            api::Database::report_all(&self.0)
         }
     }
 
@@ -152,9 +169,13 @@ pub mod online {
     impl salsa::Database for Inner {}
 
     impl api::Database for Inner {
-        fn path_diagnostics(&self, path: &Path) -> api::diagnostics::Set {
+        fn path_diagnostics(&self, path: &Path) -> api::diagnostics::MultiList {
             let path = self.paths.intern(path);
             self.diagnose_path(path)
+        }
+
+        fn report_all(&self) -> crate::diagnostics::Map {
+            Db::report_all(self)
         }
     }
 

@@ -2,7 +2,7 @@ mod analyze;
 mod api;
 mod db;
 mod error;
-mod intern;
+pub mod intern;
 mod manifest;
 mod report;
 mod vfs;

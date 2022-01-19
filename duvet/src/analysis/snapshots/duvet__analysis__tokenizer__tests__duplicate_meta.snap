@@ -1,0 +1,26 @@
+---
+source: duvet/src/analysis/tokenizer.rs
+assertion_line: 226
+expression: "parser.parse(&arcstr::literal!(r#\"\n        //= meta=1\n        //= meta=2\n        \"#))"
+
+---
+Tokens(
+    [
+        Meta {
+            location: Location {
+                line: 1,
+                indent: 8,
+            },
+            key: "meta",
+            value: "1",
+        },
+        Meta {
+            location: Location {
+                line: 2,
+                indent: 8,
+            },
+            key: "meta",
+            value: "2",
+        },
+    ],
+)

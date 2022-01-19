@@ -1,4 +1,7 @@
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::{
+    fmt,
+    sync::atomic::{AtomicU32, Ordering},
+};
 use dashmap::DashMap;
 use std::{borrow::Borrow, hash::Hash, ops::Deref, path::Path, sync::Arc};
 
@@ -85,6 +88,12 @@ impl<V: Borrow<Path>> Borrow<Path> for Value<V> {
     }
 }
 
+impl<'a, V: fmt::Debug> fmt::Debug for Ref<'a, V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 impl<V> Intern<V>
 where
     V: Hash + Eq,
@@ -103,6 +112,14 @@ where
             self.id_to_value.insert(id, value);
             id
         }
+    }
+
+    pub fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool
+    where
+        Q: Hash + Eq + ToOwned<Owned = V>,
+        Value<V>: Borrow<Q>,
+    {
+        self.value_to_id.contains_key(key)
     }
 
     pub fn resolve(&self, id: Id) -> Ref<V> {

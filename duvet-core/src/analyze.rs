@@ -1,14 +1,5 @@
 macro_rules! analyzer {
     () => {
-        #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord, Hash)]
-        pub struct Category(core::any::TypeId);
-
-        impl Category {
-            pub fn of<T: Output>() -> Self {
-                Self(core::any::TypeId::of::<T>())
-            }
-        }
-
         #[derive(Clone, Debug)]
         pub struct Analyzer(std::sync::Arc<dyn AnalyzeObj>);
 
@@ -39,35 +30,20 @@ macro_rules! analyzer {
                 self.0.as_ref()
             }
         }
+    };
+}
 
-        pub trait Output: 'static + core::any::Any + core::fmt::Debug + Send + Sync {
-            fn dyn_eq(&self, other: &dyn Output) -> bool;
-            fn as_any(&self) -> &dyn Any;
-        }
-
-        impl<T: 'static + core::any::Any + core::fmt::Debug + Eq + Send + Sync> Output for T {
-            fn dyn_eq(&self, other: &dyn Output) -> bool {
-                if let Some(other) = other.as_any().downcast_ref::<T>() {
-                    self.eq(other)
-                } else {
-                    false
-                }
-            }
-
-            fn as_any(&self) -> &dyn Any {
-                self as &dyn Any
-            }
-        }
-
+macro_rules! analysis {
+    () => {
         #[derive(Clone, Debug)]
-        pub struct Analysis(Option<std::sync::Arc<dyn Output>>);
+        pub struct Analysis(Option<std::sync::Arc<dyn crate::analyze::Output>>);
 
         impl Analysis {
             pub fn empty() -> Self {
                 Self(None)
             }
 
-            pub(crate) fn new<T: Output>(value: Option<T>) -> Self {
+            pub(crate) fn new<T: crate::analyze::Output>(value: Option<T>) -> Self {
                 if let Some(value) = value {
                     Self(Some(std::sync::Arc::new(value)))
                 } else {
@@ -86,6 +62,15 @@ macro_rules! analyzer {
         }
 
         impl Eq for Analysis {}
+
+        #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord, Hash)]
+        pub struct Category(core::any::TypeId);
+
+        impl Category {
+            pub fn of<T: crate::analyze::Output>() -> Self {
+                Self(core::any::TypeId::of::<T>())
+            }
+        }
     };
 }
 
@@ -104,7 +89,7 @@ macro_rules! analyzer_deps {
             fn new(_: Vec<$inner>) {}
         }
 
-        impl<A: Output> $name for ($dep<A>,) {
+        impl<A: crate::analyze::Output> $name for ($dep<A>,) {
             fn list() -> Vec<Category> {
                 vec![Category::of::<A>()]
             }
@@ -116,7 +101,7 @@ macro_rules! analyzer_deps {
             }
         }
 
-        impl<A: Output, B: Output> $name for ($dep<A>, $dep<B>) {
+        impl<A: crate::analyze::Output, B: crate::analyze::Output> $name for ($dep<A>, $dep<B>) {
             fn list() -> Vec<Category> {
                 vec![Category::of::<A>(), Category::of::<B>()]
             }
@@ -129,13 +114,13 @@ macro_rules! analyzer_deps {
             }
         }
 
-        pub struct $dep<T: Output> {
+        pub struct $dep<T: crate::analyze::Output> {
             #[allow(dead_code)]
             inner: $inner,
             _t: core::marker::PhantomData<T>,
         }
 
-        impl<T: Output> $dep<T> {
+        impl<T: crate::analyze::Output> $dep<T> {
             fn new(inner: $inner) -> Self {
                 Self {
                     inner,
@@ -146,5 +131,25 @@ macro_rules! analyzer_deps {
     };
 }
 
+pub trait Output: 'static + core::any::Any + core::fmt::Debug + Send + Sync {
+    fn dyn_eq(&self, other: &dyn Output) -> bool;
+    fn as_any(&self) -> &dyn core::any::Any;
+}
+
+impl<T: 'static + core::any::Any + core::fmt::Debug + Eq + Send + Sync> Output for T {
+    fn dyn_eq(&self, other: &dyn Output) -> bool {
+        if let Some(other) = other.as_any().downcast_ref::<T>() {
+            self.eq(other)
+        } else {
+            false
+        }
+    }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self as &dyn core::any::Any
+    }
+}
+
 pub mod mapper;
 pub mod reducer;
+pub mod reporter;

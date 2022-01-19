@@ -1,8 +1,15 @@
+use duvet_core::{fs::PathId, manifests::Builder, Fs};
 use serde::{de::Deserializer, Deserialize};
 
 #[derive(Debug, Deserialize)]
-pub struct Manifest {
+pub struct Schema {
     pub compliance: Compliance,
+}
+
+impl Schema {
+    pub fn load(&self, fs: &Fs, path_id: PathId, manifest: &mut Builder) {
+        // TODO
+    }
 }
 
 pub use compliance::Compliance;

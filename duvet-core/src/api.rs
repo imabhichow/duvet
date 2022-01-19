@@ -3,8 +3,16 @@ use std::path::{Path, PathBuf};
 pub use self::{database::Database, fs::Fs, manifests::Manifest};
 
 pub mod mapper {
-    pub use crate::analyze::mapper::{Analyze, Dep, Deps, DepsMap, Map, Set};
+    pub use crate::analyze::mapper::{Analyze, Dep, DepMap, Deps, DepsMap, Map, Set};
     pub use globset::Glob;
+}
+
+pub mod reducer {
+    pub use crate::analyze::reducer::{Analyze, Dep, Deps, Set};
+}
+
+pub mod reporter {
+    pub use crate::analyze::reporter::Analyze;
 }
 
 pub mod database {
@@ -12,14 +20,15 @@ pub mod database {
     pub use crate::db::{offline::Offline, online::Online};
 
     pub trait Database {
-        fn path_diagnostics(&self, path: &Path) -> diagnostics::Set;
+        fn path_diagnostics(&self, path: &Path) -> diagnostics::MultiList;
         // TODO fn workspace_diagnostics(&self) -> diagnostics::Map;
         // TODO fn generate_reports(&self);
+        fn report_all(&self) -> diagnostics::Map;
     }
 }
 
 pub mod diagnostics {
-    pub use crate::report::{Diagnostic, List, Map, Set};
+    pub use crate::report::{Diagnostic, List, Map, MultiList};
 }
 
 pub mod manifests {
@@ -34,6 +43,7 @@ pub mod fs {
         intern::Ref,
         vfs::{Node, PathId},
     };
+    pub use arcstr::{self, ArcStr, Substr};
 
     pub struct Fs<'a>(&'a dyn Db);
 

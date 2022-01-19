@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
+arcstr = { version = "1", features = ["substr"] }
 bytes = "1"
 dashmap = "4"
 globset = "0.4"
@@ -11,7 +12,6 @@ globset = "0.4"
 ignore = "0.4"
 notify = "4"
 rayon = "1"
-ropey = "1"
 salsa = "0.16"
 serde = { version = "1", features = ["derive"] }
 toml = "0.5"

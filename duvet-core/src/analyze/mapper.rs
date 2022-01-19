@@ -1,17 +1,19 @@
 use crate::{
-    analyze::reducer,
+    analyze::{reducer, Output},
     db::Db,
     report,
-    vfs::{Node, PathId, PathIdMap},
+    vfs::{Node, PathId, PathIdIter, PathIdMap, Paths},
 };
 use core::{any::Any, fmt, ops::Deref};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::{
     hash::{Hash, Hasher},
+    marker::PhantomData,
     path::Path,
 };
 
 analyzer!();
+analysis!();
 
 pub trait AnalyzeObj: 'static + Any + fmt::Debug + Send + Sync {
     fn is_match(&self, path: &Path) -> bool;
@@ -129,20 +131,28 @@ pub fn map_path(db: &dyn Db, path_id: PathId, analyzer: Analyzer) -> Set {
 pub fn map_path_category(db: &dyn Db, path_id: PathId, ty: Category) -> Set {
     let manifest = db.manifest();
     let analyzers = manifest.mappers();
-    if let Some(analyzer) = analyzers.get(&ty) {
-        db.map_path(path_id, analyzer.clone())
-    } else {
-        Set {
-            analysis: Analysis::empty(),
-            report: report::List::empty(),
+    if let Some(mappers) = analyzers.get(&ty) {
+        let paths = db.paths();
+        let path = paths.resolve(path_id);
+
+        for mapper in mappers {
+            if mapper.is_match(&path) {
+                return db.map_path(path_id, mapper.clone());
+            }
         }
+    }
+
+    Set {
+        analysis: Analysis::empty(),
+        report: report::List::empty(),
     }
 }
 
 pub fn map_category(db: &dyn Db, ty: Category) -> Map {
+    let paths = db.paths().clone();
     let sources = db.mapper_sources(ty);
 
-    let paths = sources
+    let results = sources
         .iter()
         .copied()
         .map(|source| {
@@ -151,22 +161,26 @@ pub fn map_category(db: &dyn Db, ty: Category) -> Map {
         })
         .collect();
 
-    Map { paths }
+    Map { paths, results }
+}
+
+impl Analysis {
+    fn resolve_value<T: Output>(&self) -> Option<&T> {
+        Some(
+            self.0
+                .as_ref()?
+                .as_any()
+                .downcast_ref()
+                .expect("invalid type stored for dep"),
+        )
+    }
 }
 
 analyzer_deps!(Deps, Dep, Set);
 
 impl<T: Output> Dep<T> {
     fn get(dep: &Self) -> Option<&T> {
-        Some(
-            dep.inner
-                .analysis
-                .0
-                .as_ref()?
-                .as_any()
-                .downcast_ref()
-                .unwrap(),
-        )
+        dep.inner.analysis.resolve_value()
     }
 }
 
@@ -187,7 +201,60 @@ pub struct Set {
 
 analyzer_deps!(DepsMap, DepMap, Map);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Map {
-    paths: PathIdMap<Set>,
+    paths: Paths,
+    results: PathIdMap<Set>,
+}
+
+impl PartialEq for Map {
+    fn eq(&self, other: &Self) -> bool {
+        self.results.eq(&other.results)
+    }
+}
+
+impl Eq for Map {}
+
+impl<T: Output> DepMap<T> {
+    pub fn get(&self, path: &Path) -> Option<&T> {
+        let path_id = self.inner.paths.intern(path);
+        self.inner
+            .results
+            .get(&path_id)
+            .and_then(|v| v.analysis.resolve_value())
+    }
+
+    pub fn iter(&self) -> DepMapIter<T> {
+        DepMapIter {
+            iter: self.inner.results.iter(),
+            paths: &self.inner.paths,
+            ty: PhantomData,
+        }
+    }
+}
+
+impl<T: Output> fmt::Debug for DepMap<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map().entries(self.iter()).finish()
+    }
+}
+
+pub struct DepMapIter<'a, T: Output> {
+    iter: PathIdIter<'a, Set>,
+    paths: &'a Paths,
+    ty: PhantomData<T>,
+}
+
+impl<'a, T: Output> Iterator for DepMapIter<'a, T> {
+    type Item = (crate::intern::Ref<'a, std::path::PathBuf>, &'a T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let (path_id, set) = self.iter.next()?;
+            if let Some(value) = set.analysis.resolve_value() {
+                let path = self.paths.resolve(*path_id);
+                return Some((path, value));
+            }
+        }
+    }
 }

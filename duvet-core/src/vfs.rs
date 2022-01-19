@@ -3,8 +3,8 @@ use crate::{
     error::{Error, Result},
     intern::{self, Intern},
 };
+use arcstr::{ArcStr, Substr};
 use bytes::Bytes;
-use ropey::Rope;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -29,6 +29,7 @@ pub struct PathId(intern::Id);
 
 // TODO change the default hasher
 pub type PathIdMap<V> = std::collections::HashMap<PathId, V>;
+pub type PathIdIter<'a, V> = std::collections::hash_map::Iter<'a, PathId, V>;
 
 pub trait Filesystem {
     fn paths(&self) -> &Paths;
@@ -55,8 +56,8 @@ pub fn fs_read_file(paths: &Paths, path: &Path) -> Node {
     let id = paths.intern(path);
 
     let result = (|| {
-        let file = std::fs::File::open(path)?;
-        let v = Rope::from_reader(file)?;
+        let v = std::fs::read_to_string(path)?;
+        let v = ArcStr::from(v);
         Ok(Node::String(id, v))
     })();
 
@@ -93,7 +94,7 @@ pub fn fs_read_dir(paths: &Paths, path: &Path) -> Node {
 }
 
 impl Node {
-    pub fn as_str(&self) -> Result<&Rope> {
+    pub fn as_str(&self) -> Result<&ArcStr> {
         match &*self {
             Node::String(_, v) => Ok(v),
             Node::Binary(_, _) => Err("file is not valid utf8".into()),
@@ -105,7 +106,7 @@ impl Node {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Node {
-    String(PathId, Rope),
+    String(PathId, ArcStr),
     Binary(PathId, Bytes),
     Directory(PathId, Arc<[Result<PathId, Error>]>),
     Error(PathId, Error),

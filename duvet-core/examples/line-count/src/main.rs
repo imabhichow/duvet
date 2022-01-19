@@ -2,7 +2,7 @@ use duvet_core::{
     database::{Database, Offline as Db},
     diagnostics,
     fs::Node,
-    manifests, mapper, Fs, Manifest,
+    manifests, mapper, reporter, Fs, Manifest,
 };
 use std::{path::Path, sync::Arc};
 
@@ -15,6 +15,7 @@ impl manifests::Loader for Loader {
         let mut manifest = Manifest::builder(root);
 
         manifest.with_mapper(LineCounter);
+        manifest.with_reporter(LineReport);
 
         let manifest = manifest.build().unwrap();
         Ok(manifest)
@@ -53,20 +54,36 @@ impl mapper::Analyze for LineCounter {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct LineReport;
+
+impl reporter::Analyze for LineReport {
+    type Reducers = ();
+    type Mappers = (mapper::DepMap<LineCount>,);
+
+    fn analyze(
+        &self,
+        (line_counts,): Self::Mappers,
+        _reducers: Self::Reducers,
+    ) -> diagnostics::Map {
+        for (file, counts) in line_counts.iter() {
+            println!("{}: {}", file.display(), counts.0);
+        }
+
+        Default::default()
+    }
+}
+
 fn new_db() -> Db {
     let loader = Arc::new(Loader);
     Db::new(loader)
 }
 
 fn main() {
-    let db = new_db();
-
-    println!("{:#?}", Database::path_diagnostics(&db, Path::new(file!())));
+    new_db().report_all();
 }
 
 #[test]
 fn self_test() {
-    let db = new_db();
-
-    println!("{:#?}", Database::path_diagnostics(&db, Path::new(file!())));
+    new_db().report_all();
 }

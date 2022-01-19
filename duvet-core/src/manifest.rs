@@ -1,5 +1,5 @@
 use crate::{
-    analyze::{mapper, reducer},
+    analyze::{mapper, reducer, reporter},
     db::Db,
     vfs::PathId,
 };
@@ -22,12 +22,16 @@ impl Manifest {
         builder.build().unwrap()
     }
 
-    pub(crate) fn mappers(&self) -> &BTreeMap<mapper::Category, mapper::Analyzer> {
+    pub(crate) fn mappers(&self) -> &BTreeMap<mapper::Category, Vec<mapper::Analyzer>> {
         &self.0.mappers
     }
 
     pub(crate) fn reducers(&self) -> &BTreeMap<reducer::Category, reducer::Analyzer> {
         &self.0.reducers
+    }
+
+    pub(crate) fn reporters(&self) -> &[reporter::Analyzer] {
+        &self.0.reporters
     }
 
     pub fn builder(root: PathId) -> Builder {
@@ -44,6 +48,7 @@ impl Builder {
             patterns: vec![],
             mappers: Default::default(),
             reducers: Default::default(),
+            reporters: Default::default(),
             root,
         })
     }
@@ -54,17 +59,11 @@ impl Builder {
         // Add the mapper's patterns to the globals
         self.0.patterns.extend(analyzer.patterns());
 
-        match self.0.mappers.entry(category) {
-            Entry::Vacant(entry) => {
-                entry.insert(mapper::Analyzer::new(analyzer));
-            }
-            Entry::Occupied(prev) => {
-                panic!(
-                    "mapper category {:?} is already fulfilled by {:?}",
-                    category, prev,
-                );
-            }
-        }
+        self.0
+            .mappers
+            .entry(category)
+            .or_default()
+            .push(mapper::Analyzer::new(analyzer));
 
         self
     }
@@ -87,12 +86,36 @@ impl Builder {
         self
     }
 
+    pub fn with_reporter<T: reporter::Analyze>(&mut self, analyzer: T) -> &mut Self {
+        self.0.reporters.push(reporter::Analyzer::new(analyzer));
+        self
+    }
+
     pub fn build(self) -> Result<Manifest, BuildError> {
         let mut error = BuildError::new();
 
-        for (_category, mapper) in self.0.mappers.iter() {
+        for (_category, mappers) in self.0.mappers.iter() {
+            for mapper in mappers {
+                // TODO build a graph and make sure it's acyclical
+                let (mapper_deps, reducer_deps) = mapper.dependencies();
+
+                for dep in mapper_deps {
+                    if !self.0.mappers.contains_key(dep) {
+                        error.missing_mappers.insert(*dep);
+                    }
+                }
+
+                for dep in reducer_deps {
+                    if !self.0.reducers.contains_key(dep) {
+                        error.missing_reducers.insert(*dep);
+                    }
+                }
+            }
+        }
+
+        for (_category, reducer) in self.0.reducers.iter() {
             // TODO build a graph and make sure it's acyclical
-            let (mapper_deps, reducer_deps) = mapper.dependencies();
+            let (mapper_deps, reducer_deps) = reducer.dependencies();
 
             for dep in mapper_deps {
                 if !self.0.mappers.contains_key(dep) {
@@ -107,9 +130,8 @@ impl Builder {
             }
         }
 
-        for (_category, reducer) in self.0.reducers.iter() {
-            // TODO build a graph and make sure it's acyclical
-            let (mapper_deps, reducer_deps) = reducer.dependencies();
+        for reporter in self.0.reporters.iter() {
+            let (mapper_deps, reducer_deps) = reporter.dependencies();
 
             for dep in mapper_deps {
                 if !self.0.mappers.contains_key(dep) {
@@ -154,8 +176,9 @@ impl BuildError {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct Inner {
     patterns: Vec<Glob>,
-    mappers: BTreeMap<mapper::Category, mapper::Analyzer>,
+    mappers: BTreeMap<mapper::Category, Vec<mapper::Analyzer>>,
     reducers: BTreeMap<reducer::Category, reducer::Analyzer>,
+    reporters: Vec<reporter::Analyzer>,
     root: PathId,
 }
 
@@ -213,12 +236,15 @@ pub fn mapper_sources(db: &dyn Db, ty: mapper::Category) -> Sources {
 
     let mut results = vec![];
 
-    if let Some(parser) = manifest.mappers().get(&ty) {
+    if let Some(mappers) = manifest.mappers().get(&ty) {
         for source in sources.iter().copied() {
             let path = paths.resolve(source);
 
-            if parser.is_match(&*path) {
-                results.push(source);
+            for mapper in mappers {
+                if mapper.is_match(&*path) {
+                    results.push(source);
+                    break;
+                }
             }
         }
     }
