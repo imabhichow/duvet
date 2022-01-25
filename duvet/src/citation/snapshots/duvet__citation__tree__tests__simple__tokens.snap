@@ -1,0 +1,11 @@
+---
+source: duvet/src/citation/tree.rs
+assertion_line: 382
+expression: "tokenize(\"citation\")"
+
+---
+[
+    Type(
+        "citation",
+    ),
+]

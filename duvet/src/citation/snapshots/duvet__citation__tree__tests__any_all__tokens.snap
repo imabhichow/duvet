@@ -1,0 +1,35 @@
+---
+source: duvet/src/citation/tree.rs
+assertion_line: 407
+expression: "tokenize(\"ANY(ALL(citation test) exception)\")"
+
+---
+[
+    Any(
+        "ANY",
+    ),
+    OpenParen(
+        "(",
+    ),
+    All(
+        "ALL",
+    ),
+    OpenParen(
+        "(",
+    ),
+    Type(
+        "citation",
+    ),
+    Type(
+        "test",
+    ),
+    CloseParen(
+        ")",
+    ),
+    Type(
+        "exception",
+    ),
+    CloseParen(
+        ")",
+    ),
+]

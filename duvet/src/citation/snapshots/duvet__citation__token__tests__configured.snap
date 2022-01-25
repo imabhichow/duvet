@@ -1,0 +1,23 @@
+---
+source: duvet/src/citation/token.rs
+assertion_line: 187
+expression: "parser.tokenize(&arcstr::literal!(r#\"\n        /*\n         *= meta=goes here\n         *# content goes here\n         */\n        \"#)).collect::<Vec<_>>()"
+
+---
+[
+    Meta {
+        location: Location {
+            line: 3,
+            indent: 9,
+        },
+        key: "meta",
+        value: "goes here",
+    },
+    Content {
+        location: Location {
+            line: 4,
+            indent: 9,
+        },
+        value: " content goes here",
+    },
+]

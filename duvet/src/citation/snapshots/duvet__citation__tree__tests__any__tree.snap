@@ -1,0 +1,22 @@
+---
+source: duvet/src/citation/tree.rs
+assertion_line: 387
+expression: "parse(\"ANY(citation test)\")"
+
+---
+Ok(
+    Any(
+        [
+            Type(
+                Type(
+                    0,
+                ),
+            ),
+            Type(
+                Type(
+                    1,
+                ),
+            ),
+        ],
+    ),
+)

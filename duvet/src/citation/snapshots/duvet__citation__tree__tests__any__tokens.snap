@@ -1,0 +1,23 @@
+---
+source: duvet/src/citation/tree.rs
+assertion_line: 387
+expression: "tokenize(\"ANY(citation test)\")"
+
+---
+[
+    Any(
+        "ANY",
+    ),
+    OpenParen(
+        "(",
+    ),
+    Type(
+        "citation",
+    ),
+    Type(
+        "test",
+    ),
+    CloseParen(
+        ")",
+    ),
+]

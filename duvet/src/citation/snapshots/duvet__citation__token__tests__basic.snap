@@ -1,0 +1,45 @@
+---
+source: duvet/src/citation/token.rs
+assertion_line: 163
+expression: "parser.tokenize(&arcstr::literal!(r#\"\n        //= thing goes here\n        //= meta=foo\n        //= meta2 = bar\n        //# content goes\n        //# here\n        \"#)).collect::<Vec<_>>()"
+
+---
+[
+    UnnamedMeta {
+        location: Location {
+            line: 2,
+            indent: 8,
+        },
+        value: "thing goes here",
+    },
+    Meta {
+        location: Location {
+            line: 3,
+            indent: 8,
+        },
+        key: "meta",
+        value: "foo",
+    },
+    Meta {
+        location: Location {
+            line: 4,
+            indent: 8,
+        },
+        key: "meta2",
+        value: "bar",
+    },
+    Content {
+        location: Location {
+            line: 5,
+            indent: 8,
+        },
+        value: " content goes",
+    },
+    Content {
+        location: Location {
+            line: 6,
+            indent: 8,
+        },
+        value: " here",
+    },
+]

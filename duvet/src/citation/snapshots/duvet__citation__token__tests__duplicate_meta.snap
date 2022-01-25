@@ -1,0 +1,24 @@
+---
+source: duvet/src/citation/token.rs
+assertion_line: 180
+expression: "parser.tokenize(&arcstr::literal!(r#\"\n        //= meta=1\n        //= meta=2\n        \"#)).collect::<Vec<_>>()"
+
+---
+[
+    Meta {
+        location: Location {
+            line: 2,
+            indent: 8,
+        },
+        key: "meta",
+        value: "1",
+    },
+    Meta {
+        location: Location {
+            line: 3,
+            indent: 8,
+        },
+        key: "meta",
+        value: "2",
+    },
+]

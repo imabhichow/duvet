@@ -1,0 +1,22 @@
+---
+source: duvet/src/citation/tree.rs
+assertion_line: 419
+expression: "parse(\"XOR(citation exception)\")"
+
+---
+Ok(
+    Xor(
+        [
+            Type(
+                Type(
+                    0,
+                ),
+            ),
+            Type(
+                Type(
+                    1,
+                ),
+            ),
+        ],
+    ),
+)

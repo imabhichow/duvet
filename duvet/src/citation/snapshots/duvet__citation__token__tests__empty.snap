@@ -1,0 +1,7 @@
+---
+source: duvet/src/citation/token.rs
+assertion_line: 162
+expression: "parser.tokenize(&arcstr::literal!(\"\")).collect::<Vec<_>>()"
+
+---
+[]

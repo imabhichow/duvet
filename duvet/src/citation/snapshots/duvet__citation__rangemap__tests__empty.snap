@@ -1,0 +1,7 @@
+---
+source: duvet/src/citation/rangemap.rs
+assertion_line: 228
+expression: "map([])"
+
+---
+[]

@@ -1,0 +1,31 @@
+---
+source: duvet/src/citation/tree.rs
+assertion_line: 429
+expression: "parse(\"XOR(ANY(citation test) exception)\")"
+
+---
+Ok(
+    Xor(
+        [
+            Any(
+                [
+                    Type(
+                        Type(
+                            0,
+                        ),
+                    ),
+                    Type(
+                        Type(
+                            2,
+                        ),
+                    ),
+                ],
+            ),
+            Type(
+                Type(
+                    1,
+                ),
+            ),
+        ],
+    ),
+)

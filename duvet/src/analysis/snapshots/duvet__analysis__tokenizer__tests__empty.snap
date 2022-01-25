@@ -1,9 +1,0 @@
----
-source: duvet/src/analysis/tokenizer.rs
-assertion_line: 208
-expression: "parser.parse(&arcstr::literal!(\"\"))"
-
----
-Tokens(
-    [],
-)

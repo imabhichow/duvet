@@ -1,0 +1,35 @@
+---
+source: duvet/src/citation/tree.rs
+assertion_line: 429
+expression: "tokenize(\"XOR(ANY(citation test) exception)\")"
+
+---
+[
+    Xor(
+        "XOR",
+    ),
+    OpenParen(
+        "(",
+    ),
+    Any(
+        "ANY",
+    ),
+    OpenParen(
+        "(",
+    ),
+    Type(
+        "citation",
+    ),
+    Type(
+        "test",
+    ),
+    CloseParen(
+        ")",
+    ),
+    Type(
+        "exception",
+    ),
+    CloseParen(
+        ")",
+    ),
+]

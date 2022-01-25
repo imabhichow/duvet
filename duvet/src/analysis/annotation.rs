@@ -1,7 +1,4 @@
-use crate::{
-    analysis::tokenizer::{Location, Token, Tokens},
-    citation_type,
-};
+use crate::analysis::tokenizer::{Location, Token, Tokens};
 use duvet_core::{
     diagnostics,
     fs::{ArcStr, Node, Substr},

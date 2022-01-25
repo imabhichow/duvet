@@ -1,0 +1,23 @@
+---
+source: duvet/src/citation/tree.rs
+assertion_line: 419
+expression: "tokenize(\"XOR(citation exception)\")"
+
+---
+[
+    Xor(
+        "XOR",
+    ),
+    OpenParen(
+        "(",
+    ),
+    Type(
+        "citation",
+    ),
+    Type(
+        "exception",
+    ),
+    CloseParen(
+        ")",
+    ),
+]

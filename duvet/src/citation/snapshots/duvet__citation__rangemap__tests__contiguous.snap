@@ -1,0 +1,14 @@
+---
+source: duvet/src/citation/rangemap.rs
+assertion_line: 231
+expression: "map([(0..4, 0), (4..10, 0)])"
+
+---
+[
+    (
+        0..10,
+        [
+            0,
+        ],
+    ),
+]

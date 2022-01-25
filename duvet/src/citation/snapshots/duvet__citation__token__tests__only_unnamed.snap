@@ -1,0 +1,22 @@
+---
+source: duvet/src/citation/token.rs
+assertion_line: 173
+expression: "parser.tokenize(&arcstr::literal!(r#\"\n        //= this is meta\n        //= this is other meta\n        \"#)).collect::<Vec<_>>()"
+
+---
+[
+    UnnamedMeta {
+        location: Location {
+            line: 2,
+            indent: 8,
+        },
+        value: "this is meta",
+    },
+    UnnamedMeta {
+        location: Location {
+            line: 3,
+            indent: 8,
+        },
+        value: "this is other meta",
+    },
+]

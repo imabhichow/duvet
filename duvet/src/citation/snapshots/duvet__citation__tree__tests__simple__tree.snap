@@ -1,0 +1,13 @@
+---
+source: duvet/src/citation/tree.rs
+assertion_line: 382
+expression: "parse(\"citation\")"
+
+---
+Ok(
+    Type(
+        Type(
+            0,
+        ),
+    ),
+)

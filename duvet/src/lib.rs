@@ -4,10 +4,13 @@ use std::{path::Path, sync::Arc};
 type Result<V, E = Error> = core::result::Result<V, E>;
 type Error = anyhow::Error;
 
-mod analysis;
-mod citation_type;
-mod manifest;
+#[macro_use]
 mod static_intern;
+
+// mod analysis;
+mod citation;
+mod error;
+mod manifest;
 
 pub use manifest::Loader;
 

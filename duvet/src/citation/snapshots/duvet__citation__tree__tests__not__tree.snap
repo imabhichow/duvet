@@ -1,0 +1,15 @@
+---
+source: duvet/src/citation/tree.rs
+assertion_line: 437
+expression: "parse(\"NOT(citation)\")"
+
+---
+Ok(
+    Not(
+        Type(
+            Type(
+                0,
+            ),
+        ),
+    ),
+)

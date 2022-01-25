@@ -1,0 +1,20 @@
+---
+source: duvet/src/citation/tree.rs
+assertion_line: 437
+expression: "tokenize(\"NOT(citation)\")"
+
+---
+[
+    Not(
+        "NOT",
+    ),
+    OpenParen(
+        "(",
+    ),
+    Type(
+        "citation",
+    ),
+    CloseParen(
+        ")",
+    ),
+]
