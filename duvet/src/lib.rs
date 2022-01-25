@@ -10,6 +10,7 @@ mod static_intern;
 // mod analysis;
 mod citation;
 mod error;
+mod ietf;
 mod manifest;
 
 pub use manifest::Loader;

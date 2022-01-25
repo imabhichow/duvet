@@ -48,7 +48,7 @@ impl<'a> Tokenizer<'a> {
 
 pub struct Iter<'a> {
     tokenizer: Tokenizer<'a>,
-    inner: core::str::Lines<'a>,
+    lines: core::str::Lines<'a>,
     contents: &'a ArcStr,
     lineno: usize,
 }
@@ -58,7 +58,7 @@ impl<'a> Iter<'a> {
         Self {
             tokenizer,
             contents,
-            inner: contents.lines(),
+            lines: contents.lines(),
             lineno: 0,
         }
     }
@@ -121,7 +121,7 @@ impl<'a> Iterator for Iter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            let line = self.inner.next()?;
+            let line = self.lines.next()?;
             if let Some(token) = self.on_line(line) {
                 return Some(token);
             }
